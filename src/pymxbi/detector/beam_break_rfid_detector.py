@@ -4,7 +4,7 @@ from threading import Thread
 from time import sleep, time
 
 from pymxbi.detector.detector import DetectionResult, Detector
-from pymxbi.peripheral.rfid.dorset_lid665v42 import DorsetLID665v42
+from pymxbi.peripheral.rfid.rfid import RFIDReader, RFIDTag
 from pymxbi.peripheral.through_beam_sensor.through_beam_sensor import ThroughBeamSensor
 
 
@@ -15,7 +15,7 @@ class BeamBreakRFIDDetector(Detector):
     ----------
     animal_db : dict[str, str]
         Mapping from animal ID to animal name.
-    rfid_reader : DorsetLID665v42
+    rfid_reader : RFIDReader
         RFID reader used to fetch tags.
     beam_break_sensor : ThroughBeamSensor
         Through-beam sensor used to detect presence.
@@ -28,7 +28,7 @@ class BeamBreakRFIDDetector(Detector):
     def __init__(
         self,
         animal_db: dict[str, str],
-        rfid_reader: DorsetLID665v42,
+        rfid_reader: RFIDReader,
         beam_break_sensor: ThroughBeamSensor,
         detection_frequency: int,  # milliseconds
         max_tag_age_seconds: float = 5.0,
@@ -39,7 +39,7 @@ class BeamBreakRFIDDetector(Detector):
         ----------
         animal_db : dict[str, str]
             Mapping from animal ID to animal name.
-        rfid_reader : DorsetLID665v42
+        rfid_reader : RFIDReader
             RFID reader used to fetch tags.
         beam_break_sensor : ThroughBeamSensor
             Through-beam sensor used to detect presence.
@@ -66,7 +66,7 @@ class BeamBreakRFIDDetector(Detector):
                 sleep(self.detection_frequency)
                 continue
 
-            tag = self._rfid_reader.read()
+            tag: RFIDTag | None = self._rfid_reader.read()
             if tag is None:
                 sleep(self.detection_frequency)
                 continue
