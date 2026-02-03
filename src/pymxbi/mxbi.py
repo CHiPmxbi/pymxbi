@@ -1,14 +1,19 @@
 from typing import Mapping, Any
 from pymxbi.rewarder.rewarder import Rewarder
 from pymxbi.detector.detector import Detector
+from pymxbi.screen import Screen
 
 
 class MXBI:
     def __init__(
         self,
+        screen_size: Screen | tuple[int, int],
         rewarder: Rewarder | dict[int, Rewarder],
         detector: Detector | dict[int, Detector],
     ):
+        if not isinstance(screen_size, Screen):
+            screen_size = Screen(width=screen_size[0], height=screen_size[1])
+        self._screen_size = screen_size
         self._rewarder = self._normalize(rewarder, "rewarder")
         self._detector = self._normalize(detector, "detector")
 
@@ -45,6 +50,10 @@ class MXBI:
         if detector is None:
             raise RuntimeError(f"No detector with id {detector_id} found")
         return detector
+
+    @property
+    def screen_size(self):
+        return self._screen_size
 
 
 _current_mxbi: MXBI | None = None
