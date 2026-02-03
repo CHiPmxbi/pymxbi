@@ -3,7 +3,7 @@
 from typing import Protocol
 
 
-class ThroughBeamSensor(Protocol):
+class BeamBreakSensor(Protocol):
     """Protocol for sensors that detect a broken through-beam."""
 
     def read(self) -> bool:
