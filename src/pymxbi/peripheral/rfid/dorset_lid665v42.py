@@ -274,6 +274,7 @@ class DorsetLID665v42:
         """
         with self._current_result_lock:
             result = self._current_result
+            self._current_result = None
             return result
 
     def begin(self) -> None:
