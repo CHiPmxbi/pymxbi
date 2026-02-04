@@ -7,11 +7,12 @@ the built-in detector state machine.
 from threading import Event, Lock, Thread, Timer
 from time import sleep, time
 
-from pymxbi.detector.detector import DetectionResult, Detector
-from pymxbi.peripheral.rfid.rfid import RFIDReader, RFIDTag
+from .detector import DetectionResult
+from .continuous_detector import ContinuousDetector
+from ..peripheral.rfid import RFIDReader, RFIDTag
 
 
-class RFIDDetector(Detector):
+class RFIDContinuousDetector(ContinuousDetector):
     """Detect animals using only an RFID reader.
 
     Parameters
@@ -123,7 +124,7 @@ class RFIDDetector(Detector):
             sleep(self.poll_interval)
 
     def _handle_tag(self, tag: RFIDTag) -> None:
-        animal_name = self.animal_db.get(tag.animal_id)
+        animal_name = self._animal_db.get(tag.animal_id)
         if not animal_name:
             return
 

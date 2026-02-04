@@ -214,6 +214,8 @@ class StandardGateDetector:
 
         self._running = False
 
+    def process_detection(self, detection_result: DetectionResult) -> None: ...
+
     def register_event(
         self, event: DetectorEvent, callback: Callable[[DetectionResult], None]
     ) -> None:

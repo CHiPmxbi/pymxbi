@@ -1,76 +1,14 @@
 """Detector abstractions and the built-in detector state machine."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace
-from enum import StrEnum, auto
+from dataclasses import replace
 from threading import Lock
 from typing import Callable
 
-
-class DetectorState(StrEnum):
-    """Detector finite states.
-
-    Attributes
-    ----------
-    IDLE
-        No animal is currently detected.
-    ANIMAL_PRESENT
-        An animal is currently detected.
-    FAULT
-        A fault was detected and the detector is in an error state.
-    """
-
-    IDLE = auto()
-    ANIMAL_PRESENT = auto()
-    FAULT = auto()
+from .detector import DetectionResult, DetectorEvent, DetectorState
 
 
-class DetectorEvent(StrEnum):
-    """Detector events emitted on state transitions.
-
-    Attributes
-    ----------
-    ANIMAL_ENTERED
-        Transition from idle to an animal being present.
-    ANIMAL_RETURNED
-        Animal reappeared after a brief absence.
-    ANIMAL_CHANGED
-        A different animal replaced the currently detected one.
-    ANIMAL_LEFT
-        Transition from an animal being present to idle.
-    ANIMAL_REMAINED
-        The same animal remains present across cycles.
-    FAULT_DETECTED
-        A fault occurred while detecting.
-    """
-
-    ANIMAL_ENTERED = auto()
-    ANIMAL_RETURNED = auto()
-    ANIMAL_CHANGED = auto()
-    ANIMAL_LEFT = auto()
-    ANIMAL_REMAINED = auto()
-    FAULT_DETECTED = auto()
-
-
-@dataclass
-class DetectionResult:
-    """Detection result from a detector input cycle.
-
-    Parameters
-    ----------
-    animal_name : str | None, default=None
-        Name of the detected animal, if any.
-    error : bool, default=False
-        Whether a fault was detected while reading inputs.
-    """
-
-    timestamp: float = 0.0
-    animal_id: str | None = None
-    animal_name: str | None = None
-    error: bool = False
-
-
-class DetectorStateMachine:
+class ContinuousDetectorStateMachine:
     """State machine that drives detector events.
 
     Parameters
@@ -79,7 +17,7 @@ class DetectorStateMachine:
         Detector instance used to emit events to registered callbacks.
     """
 
-    def __init__(self, detector: Detector) -> None:
+    def __init__(self, detector: ContinuousDetector) -> None:
         """Initialize with a detector for event emission."""
         self.detector = detector
 
@@ -207,7 +145,7 @@ class DetectorStateMachine:
             self._handle_animal_entered(detection_result)
 
 
-class Detector(ABC):
+class ContinuousDetector(ABC):
     """Abstract detector base class.
 
     Parameters
@@ -223,9 +161,9 @@ class Detector(ABC):
         ] = {}
 
         self._state_lock = Lock()
-        self._state_machine = DetectorStateMachine(self)
+        self._state_machine = ContinuousDetectorStateMachine(self)
 
-        self.animal_db = animal_db
+        self._animal_db = animal_db
 
     def register_event(
         self, event: DetectorEvent, callback: Callable[[DetectionResult], None]
@@ -278,3 +216,8 @@ class Detector(ABC):
     def current_state(self) -> DetectorState:
         """Return the current detector state."""
         return self._state_machine.current_state
+
+    @property
+    def animal_list(self) -> list[str]:
+        """Return a list of animal names."""
+        return list(self._animal_db.values())

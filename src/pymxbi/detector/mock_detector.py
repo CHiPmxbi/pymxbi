@@ -4,13 +4,11 @@ from collections.abc import Sequence
 from threading import Lock, Thread
 from time import sleep, time
 
-from pymxbi.detector.detector import (
-    DetectionResult,
-    Detector,
-)
+from .detector import DetectionResult
+from .continuous_detector import ContinuousDetector
 
 
-class MockDetector(Detector):
+class MockDetector(ContinuousDetector):
     """Detector stub that performs no I/O.
 
     This class lets you drive the detector state machine manually to produce
