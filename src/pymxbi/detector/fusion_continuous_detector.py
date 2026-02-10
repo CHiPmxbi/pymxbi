@@ -95,9 +95,6 @@ class FusionContinuousDetector:
             DetectorEvent, list[Callable[[DetectionResult], None]]
         ] = {evt: [] for evt in DetectorEvent}
 
-        # Animal registry: animal_id (from RFID tag) -> display name
-        self._animals: dict[str, str] = {}
-
         # State-machine bookkeeping
         self._state: _State = _State.IDLE
         self._prev_beam: bool = False
@@ -158,17 +155,6 @@ class FusionContinuousDetector:
         """Subscribe *callback* to a specific :class:`DetectorEvent`."""
         self._callbacks[event].append(callback)
 
-    def register_animal(self, animals: dict[str, str]) -> None:
-        """Register known animals.
-
-        Parameters
-        ----------
-        animals:
-            Mapping of ``animal_id`` (as stored on the RFID tag) to a
-            human-readable ``animal_name``.
-        """
-        self._animals.update(animals)
-
     # ---- Detector protocol: lifecycle ------------------------------------
 
     def begin(self) -> None:
@@ -191,11 +177,6 @@ class FusionContinuousDetector:
         """Return the ``animal_id`` of the animal currently on the sensor."""
         with self._lock:
             return self._current_animal
-
-    @property
-    def animal_list(self) -> list[str]:
-        """Return a list of registered animal IDs."""
-        return list(self._animals.keys())
 
     # ---- internal: worker loop -------------------------------------------
 
@@ -277,12 +258,6 @@ class FusionContinuousDetector:
 
     # ---- internal: result helpers ----------------------------------------
 
-    def _resolve_name(self, animal_id: str | None) -> str | None:
-        """Look up the display name for an animal ID."""
-        if animal_id is None:
-            return None
-        return self._animals.get(animal_id)
-
     def _make_result(
         self,
         *,
@@ -292,7 +267,6 @@ class FusionContinuousDetector:
         return DetectionResult(
             timestamp=time(),
             animal_id=animal_id,
-            animal_name=self._resolve_name(animal_id),
             error=error,
         )
 
