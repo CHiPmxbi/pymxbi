@@ -1,47 +1,30 @@
-import argparse
+import typer
+
+app = typer.Typer()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Beam break sensor CLI test.")
-    parser.add_argument(
-        "-p",
-        "--pin",
-        type=int,
-        default=17,
-        help="GPIO pin number (default: 10).",
-    )
-    parser.add_argument(
-        "-d",
-        "--debounce-time",
-        type=float,
-        default=0.05,
-        help="Debounce time in seconds (default: 0.05).",
-    )
-    normally_open_group = parser.add_mutually_exclusive_group()
-    normally_open_group.add_argument(
-        "--normally-open",
-        dest="normally_open",
-        action="store_true",
-        default=True,
-        help="Set sensor as normally open (default).",
-    )
-    normally_open_group.add_argument(
-        "--normally-closed",
-        dest="normally_open",
-        action="store_false",
-        help="Set sensor as normally closed.",
-    )
-    return parser.parse_args()
+def prompt_sensor_config():
+    pin = typer.prompt("GPIO pin", type=int, default=17)
+    if pin < 0:
+        raise typer.BadParameter("pin must be >= 0")
+
+    debounce_time = typer.prompt("Debounce time (seconds)", type=float, default=0.05)
+    if debounce_time < 0:
+        raise typer.BadParameter("debounce_time must be >= 0")
+
+    normally_open = typer.confirm("Normally open?", default=True)
+    return pin, debounce_time, normally_open
 
 
-def cli_test():
+@app.command()
+def run():
     from .RPI_IR_break_beam_sensor import RPIIRBreakBeamSensor
 
-    args = parse_args()
+    pin, debounce_time, normally_open = prompt_sensor_config()
     sensor = RPIIRBreakBeamSensor(
-        pin=args.pin,
-        debounce_time=args.debounce_time,
-        normally_open=args.normally_open,
+        pin=pin,
+        debounce_time=debounce_time,
+        normally_open=normally_open,
     )
 
     try:
@@ -52,4 +35,4 @@ def cli_test():
 
 
 if __name__ == "__main__":
-    cli_test()
+    app()
