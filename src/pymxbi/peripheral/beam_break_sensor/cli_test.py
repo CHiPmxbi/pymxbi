@@ -1,4 +1,5 @@
 import typer
+from time import sleep
 
 app = typer.Typer()
 
@@ -30,6 +31,7 @@ def run():
     try:
         while True:
             print(sensor.read())
+            sleep(0.1)
     except KeyboardInterrupt:
         print("Exiting.")
 

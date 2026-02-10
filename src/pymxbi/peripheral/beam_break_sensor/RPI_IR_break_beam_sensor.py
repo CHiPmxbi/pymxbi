@@ -1,88 +1,89 @@
-"""Raspberry Pi IR through-beam sensor implementation."""
+"""Raspberry Pi IR through-beam sensor implementation — polling mode."""
 
-from threading import Timer, Lock
-from typing import Optional
+import time
+from threading import Thread, Lock, Event
 
-from gpiozero import DigitalInputDevice
+from gpiozero import InputDevice
 
 
 class RPIIRBreakBeamSensor:
-    """Read an IR break-beam sensor via a Raspberry Pi GPIO input.
+    """Read an IR break-beam sensor via polling.
 
     Parameters
     ----------
     pin : int
         GPIO pin connected to the sensor output.
     normally_open : bool
-        If ``True`` (default), the sensor is normally-open: HIGH means beam
-        broken.  If ``False``, the logic is inverted (HIGH means beam intact).
+        ``True`` for normally-open sensor, ``False`` for normally-closed.
     debounce_time : float
-        Software debounce window in seconds.  Default is 0.05 s (50 ms).
-        Set to 0 to disable.
+        Debounce window in seconds (default 0.05).
+    poll_interval : float
+        How often to sample the pin in seconds (default 0.01).
     """
 
     def __init__(
         self,
         pin: int,
-        normally_open: bool = True,
+        normally_open: bool = False,
         debounce_time: float = 0.05,
+        poll_interval: float = 0.01,
     ) -> None:
-        self._pin = pin
         self._normally_open = normally_open
         self._debounce_time = debounce_time
+        self._poll_interval = poll_interval
         self._lock = Lock()
-        self._debounce_timer: Optional[Timer] = None
+        self._stop_event = Event()
 
         try:
-            self._sensor = DigitalInputDevice(pin)
+            self._device = InputDevice(pin, pull_up=False)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to initialize IR break beam sensor on pin {pin}: {exc}"
             ) from exc
 
-        self._last_stable_state: bool = self._sample()
+        self._last_stable: bool = self._sample()
+        self._pending: bool = self._last_stable
+        self._pending_since: float = time.monotonic()
 
-        if self._debounce_time > 0:
-            self._sensor.when_activated = self._on_raw_edge
-            self._sensor.when_deactivated = self._on_raw_edge
+        self._poll_thread = Thread(target=self._poll_loop, daemon=True)
+        self._poll_thread.start()
 
     def read(self) -> bool:
-        """Read the debounced sensor state.
+        """Return the debounced beam state.
 
         Returns
         -------
         bool
-            ``True`` when the beam is broken, otherwise ``False``.
+            ``True`` when the beam is broken, ``False`` when intact.
         """
-        if self._debounce_time <= 0:
-            return self._sample()
         with self._lock:
-            return self._last_stable_state
+            return self._last_stable
 
     def close(self) -> None:
-        """Release GPIO resources."""
-        with self._lock:
-            if self._debounce_timer is not None:
-                self._debounce_timer.cancel()
-        self._sensor.close()
+        """Stop polling and release GPIO resources."""
+        self._stop_event.set()
+        self._poll_thread.join(timeout=1.0)
+        self._device.close()
 
     # -- internals ------------------------------------------------------------
 
     def _sample(self) -> bool:
-        """Read raw pin and apply NO/NC logic."""
-        raw = bool(self._sensor.value)
-        return raw if self._normally_open else not raw
+        raw = bool(self._device.value)
+        return not raw if self._normally_open else raw
 
-    def _on_raw_edge(self) -> None:
-        with self._lock:
-            if self._debounce_timer is not None:
-                self._debounce_timer.cancel()
-            self._debounce_timer = Timer(
-                self._debounce_time, self._on_debounce_expired,
-            )
-            self._debounce_timer.daemon = True
-            self._debounce_timer.start()
+    def _poll_loop(self) -> None:
+        while not self._stop_event.is_set():
+            current = self._sample()
+            now = time.monotonic()
 
-    def _on_debounce_expired(self) -> None:
-        with self._lock:
-            self._last_stable_state = self._sample()
+            with self._lock:
+                if current != self._pending:
+                    self._pending = current
+                    self._pending_since = now
+                elif (
+                    current != self._last_stable
+                    and (now - self._pending_since) >= self._debounce_time
+                ):
+                    self._last_stable = current
+
+            self._stop_event.wait(self._poll_interval)
