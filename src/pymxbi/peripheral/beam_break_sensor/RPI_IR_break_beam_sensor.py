@@ -24,7 +24,7 @@ class RPIIRBreakBeamSensor:
     def __init__(
         self,
         pin: int,
-        normally_open: bool = False,
+        normally_open: bool = True,
         debounce_time: float = 0.05,
         poll_interval: float = 0.01,
     ) -> None:
