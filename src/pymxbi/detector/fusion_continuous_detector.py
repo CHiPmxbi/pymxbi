@@ -21,18 +21,18 @@ from .detector import DetectionResult, DetectorEvent
 class _State(Enum):
     """Internal states of the fusion detector."""
 
-    IDLE = auto()  # Beam clear, no animal
-    ANIMAL_PRESENT = auto()  # Beam broken, waiting for RFID (within 10 s)
+    IDLE = auto()              # Beam clear, no animal
+    ANIMAL_PRESENT = auto()    # Beam broken, waiting for RFID (within 10 s)
     ANIMAL_CONFIRMED = auto()  # Beam broken and RFID matched
 
 
 class _Event(Enum):
     """Events that drive the state machine."""
 
-    RISING_EDGE = auto()  # Beam just broken  (animal enters)
+    RISING_EDGE = auto()   # Beam just broken  (animal enters)
     FALLING_EDGE = auto()  # Beam just restored (animal leaves)
-    RFID_READ = auto()  # Valid RFID tag obtained within window
-    TIMEOUT = auto()  # 10 s elapsed without RFID while beam broken
+    RFID_READ = auto()     # Valid RFID tag obtained within window
+    TIMEOUT = auto()       # 10 s elapsed without RFID while beam broken
 
 
 # ---------------------------------------------------------------------------
@@ -111,38 +111,20 @@ class FusionContinuousDetector:
         noop = self._noop
         self._table: dict[tuple[_State, _Event], _Transition] = {
             # -- IDLE ------------------------------------------------------
-            (_State.IDLE, _Event.RISING_EDGE): _Transition(
-                _State.ANIMAL_PRESENT, self._on_rising_edge
-            ),
+            (_State.IDLE, _Event.RISING_EDGE):  _Transition(_State.ANIMAL_PRESENT, self._on_rising_edge),
             (_State.IDLE, _Event.FALLING_EDGE): _Transition(_State.IDLE, noop),
-            (_State.IDLE, _Event.RFID_READ): _Transition(_State.IDLE, noop),
-            (_State.IDLE, _Event.TIMEOUT): _Transition(_State.IDLE, noop),
+            (_State.IDLE, _Event.RFID_READ):    _Transition(_State.IDLE, noop),
+            (_State.IDLE, _Event.TIMEOUT):      _Transition(_State.IDLE, noop),
             # -- ANIMAL_PRESENT (beam broken, awaiting RFID) ---------------
-            (_State.ANIMAL_PRESENT, _Event.RISING_EDGE): _Transition(
-                _State.ANIMAL_PRESENT, noop
-            ),
-            (_State.ANIMAL_PRESENT, _Event.FALLING_EDGE): _Transition(
-                _State.IDLE, self._on_left_unconfirmed
-            ),
-            (_State.ANIMAL_PRESENT, _Event.RFID_READ): _Transition(
-                _State.ANIMAL_CONFIRMED, self._on_rfid_confirmed
-            ),
-            (_State.ANIMAL_PRESENT, _Event.TIMEOUT): _Transition(
-                _State.ANIMAL_CONFIRMED, self._on_rfid_timeout
-            ),
+            (_State.ANIMAL_PRESENT, _Event.RISING_EDGE):  _Transition(_State.ANIMAL_PRESENT, noop),
+            (_State.ANIMAL_PRESENT, _Event.FALLING_EDGE): _Transition(_State.IDLE, self._on_left_unconfirmed),
+            (_State.ANIMAL_PRESENT, _Event.RFID_READ):    _Transition(_State.ANIMAL_CONFIRMED, self._on_rfid_confirmed),
+            (_State.ANIMAL_PRESENT, _Event.TIMEOUT):      _Transition(_State.ANIMAL_CONFIRMED, self._on_rfid_timeout),
             # -- ANIMAL_CONFIRMED (beam broken, RFID matched) --------------
-            (_State.ANIMAL_CONFIRMED, _Event.RISING_EDGE): _Transition(
-                _State.ANIMAL_CONFIRMED, noop
-            ),
-            (_State.ANIMAL_CONFIRMED, _Event.FALLING_EDGE): _Transition(
-                _State.IDLE, self._on_left_confirmed
-            ),
-            (_State.ANIMAL_CONFIRMED, _Event.RFID_READ): _Transition(
-                _State.ANIMAL_CONFIRMED, noop
-            ),
-            (_State.ANIMAL_CONFIRMED, _Event.TIMEOUT): _Transition(
-                _State.ANIMAL_CONFIRMED, noop
-            ),
+            (_State.ANIMAL_CONFIRMED, _Event.RISING_EDGE):  _Transition(_State.ANIMAL_CONFIRMED, noop),
+            (_State.ANIMAL_CONFIRMED, _Event.FALLING_EDGE): _Transition(_State.IDLE, self._on_left_confirmed),
+            (_State.ANIMAL_CONFIRMED, _Event.RFID_READ):    _Transition(_State.ANIMAL_CONFIRMED, noop),
+            (_State.ANIMAL_CONFIRMED, _Event.TIMEOUT):      _Transition(_State.ANIMAL_CONFIRMED, noop),
         }
 
     # ---- Detector protocol: registration ---------------------------------
@@ -283,11 +265,11 @@ class FusionContinuousDetector:
     def _on_rising_edge(self) -> None:
         """Beam broken — start RFID acquisition window."""
         self._edge_time = time()
-        self._last_tag = None
 
     def _on_rfid_confirmed(self) -> None:
         """RFID read while beam is broken — animal entered."""
-        assert self._last_tag is not None
+        if self._last_tag is None:
+            return
         animal_id = self._last_tag.animal_id
         self._current_animal = animal_id
         self._emit(
@@ -305,7 +287,9 @@ class FusionContinuousDetector:
 
     def _on_left_confirmed(self) -> None:
         """Beam restored after RFID confirmation — animal left."""
-        animal_id = self._last_tag.animal_id if self._last_tag else self._current_animal
+        animal_id = (
+            self._last_tag.animal_id if self._last_tag else self._current_animal
+        )
         self._emit(
             DetectorEvent.ANIMAL_LEFT,
             self._make_result(animal_id=animal_id),

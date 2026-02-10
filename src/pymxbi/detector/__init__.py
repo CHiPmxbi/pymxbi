@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 
 from .beambreak_continuous_detector import BeambreakContinuousDetector
 from .detector import Detector, DetectorEnum
-from .fusion_continuous_detector import FusionContinuousDetector
 from .mock_detector import MockDetector
 from .rfid_continuous_detector import RFIDContinuousDetector
 from .standard_gate_detector import StandardGateDetector
@@ -14,7 +13,6 @@ detectors: dict[str, type[Detector]] = {
     DetectorEnum.STANDARD_GATE: StandardGateDetector,
     DetectorEnum.RFID_CONTINUOUS: RFIDContinuousDetector,
     DetectorEnum.BEAMBREAK_CONTINUOUS: BeambreakContinuousDetector,
-    DetectorEnum.FUSION_CONTINUOUS: FusionContinuousDetector,
 }
 
 
@@ -91,7 +89,6 @@ __all__ = [
     "RFIDContinuousDetectorModel",
     "BeambreakContinuousDetector",
     "BeamBreakContinuousDetectorModel",
-    "FusionContinuousDetector",
     "FusionContinuousDetectorModel",
     "DetectorEnum",
     "DetectorModel",
