@@ -14,9 +14,8 @@ class RPIIRBreakBeamSensor:
     pin : int
         GPIO pin connected to the sensor output.
     normally_open : bool
-        If ``True`` (default), the sensor is normally-open: output LOW when
-        the beam is intact, HIGH when broken.  If ``False``, the sensor is
-        normally-closed (inverted logic).
+        If ``True`` (default), the sensor is normally-open: HIGH means beam
+        broken.  If ``False``, the logic is inverted (HIGH means beam intact).
     debounce_time : float
         Software debounce window in seconds.  Default is 0.05 s (50 ms).
         Set to 0 to disable.
@@ -29,23 +28,19 @@ class RPIIRBreakBeamSensor:
         debounce_time: float = 0.05,
     ) -> None:
         self._pin = pin
+        self._normally_open = normally_open
         self._debounce_time = debounce_time
         self._lock = Lock()
         self._debounce_timer: Optional[Timer] = None
 
-        pull_up = normally_open
-        active_state = not normally_open
-
         try:
-            self._sensor = DigitalInputDevice(
-                pin, pull_up=pull_up, active_state=active_state,
-            )
+            self._sensor = DigitalInputDevice(pin)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to initialize IR break beam sensor on pin {pin}: {exc}"
             ) from exc
 
-        self._last_stable_state: bool = bool(self._sensor.value)
+        self._last_stable_state: bool = self._sample()
 
         if self._debounce_time > 0:
             self._sensor.when_activated = self._on_raw_edge
@@ -60,7 +55,7 @@ class RPIIRBreakBeamSensor:
             ``True`` when the beam is broken, otherwise ``False``.
         """
         if self._debounce_time <= 0:
-            return bool(self._sensor.value)
+            return self._sample()
         with self._lock:
             return self._last_stable_state
 
@@ -72,6 +67,11 @@ class RPIIRBreakBeamSensor:
         self._sensor.close()
 
     # -- internals ------------------------------------------------------------
+
+    def _sample(self) -> bool:
+        """Read raw pin and apply NO/NC logic."""
+        raw = bool(self._sensor.value)
+        return raw if self._normally_open else not raw
 
     def _on_raw_edge(self) -> None:
         with self._lock:
@@ -85,4 +85,4 @@ class RPIIRBreakBeamSensor:
 
     def _on_debounce_expired(self) -> None:
         with self._lock:
-            self._last_stable_state = bool(self._sensor.value)
+            self._last_stable_state = self._sample()
