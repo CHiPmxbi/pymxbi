@@ -1,151 +1,351 @@
 """Detector combining a through-beam sensor and an RFID reader."""
 
-from threading import Thread
+from __future__ import annotations
+
+from enum import Enum, auto
+from threading import Thread, Event, Lock
 from time import sleep, time
+from typing import Callable, NamedTuple
 
 from pymxbi.peripheral.beam_break_sensor.beam_break_sensor import BeamBreakSensor
 from pymxbi.peripheral.rfid.rfid import RFIDReader, RFIDTag
 
-from .continuous_detector import ContinuousDetector
-from .detector import DetectionResult
+from .detector import DetectionResult, DetectorEvent
 
 
-class FusionContinuousDetector(ContinuousDetector):
-    """Detect animals using a beam-break sensor and an RFID reader.
+# ---------------------------------------------------------------------------
+# State-machine enums
+# ---------------------------------------------------------------------------
 
-    Parameters
-    ----------
-    animal_db : dict[str, str]
-        Mapping from animal ID to animal name.
-    rfid_reader : RFIDReader
-        RFID reader used to fetch tags.
-    beam_break_sensor : ThroughBeamSensor
-        Through-beam sensor used to detect presence.
-    detection_frequency : int
-        Polling interval in milliseconds.
+
+class _State(Enum):
+    """Internal states of the fusion detector."""
+
+    IDLE = auto()  # Beam clear, no animal
+    ANIMAL_PRESENT = auto()  # Beam broken, waiting for RFID (within 10 s)
+    ANIMAL_CONFIRMED = auto()  # Beam broken and RFID matched
+
+
+class _Event(Enum):
+    """Events that drive the state machine."""
+
+    RISING_EDGE = auto()  # Beam just broken  (animal enters)
+    FALLING_EDGE = auto()  # Beam just restored (animal leaves)
+    RFID_READ = auto()  # Valid RFID tag obtained within window
+    TIMEOUT = auto()  # 10 s elapsed without RFID while beam broken
+
+
+# ---------------------------------------------------------------------------
+# Transition-table type
+# ---------------------------------------------------------------------------
+
+_Action = Callable[[], None]
+
+
+class _Transition(NamedTuple):
+    next_state: _State
+    action: _Action
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_RFID_TIMEOUT_S: float = 10.0
+_POLL_INTERVAL_S: float = 0.05
+
+
+# ---------------------------------------------------------------------------
+# Detector
+# ---------------------------------------------------------------------------
+
+
+class FusionContinuousDetector:
+    """Fuses a through-beam sensor with an RFID reader.
+
+    Implements the :class:`Detector` protocol.
+
+    Detection logic
+    ---------------
+    * **Rising edge** (beam broken — animal arrives): start a 10 s window to
+      acquire an RFID tag.  If a tag whose ``detect_time`` falls within the
+      window is read, emit ``ANIMAL_ENTERED`` with the animal's identity.
+      If the window expires without a valid tag, emit ``ANIMAL_ENTERED``
+      with ``animal_id=None`` and ``error=True`` (unknown animal).
+    * **Falling edge** (beam restored — animal leaves): emit ``ANIMAL_LEFT``
+      immediately — no recent RFID result is required.
     """
+
+    # ---- construction ----------------------------------------------------
 
     def __init__(
         self,
         rfid_reader: RFIDReader,
         beam_break_sensor: BeamBreakSensor,
+        poll_interval: float = _POLL_INTERVAL_S,
+        rfid_timeout: float = _RFID_TIMEOUT_S,
     ) -> None:
-        """Initialize the detector.
+        self._rfid_reader = rfid_reader
+        self._beam_break_sensor = beam_break_sensor
+        self._poll_interval = poll_interval
+        self._rfid_timeout = rfid_timeout
+
+        # Event callbacks: DetectorEvent -> list of subscribers
+        self._callbacks: dict[
+            DetectorEvent, list[Callable[[DetectionResult], None]]
+        ] = {evt: [] for evt in DetectorEvent}
+
+        # Animal registry: animal_id (from RFID tag) -> display name
+        self._animals: dict[str, str] = {}
+
+        # State-machine bookkeeping
+        self._state: _State = _State.IDLE
+        self._prev_beam: bool = False
+        self._edge_time: float = 0.0
+        self._last_tag: RFIDTag | None = None
+        self._current_animal: str | None = None
+
+        # Thread control
+        self._lock = Lock()
+        self._stop_event = Event()
+        self._thread: Thread | None = None
+
+        # ---- transition table (instance-level, bound methods) ------------
+        noop = self._noop
+        self._table: dict[tuple[_State, _Event], _Transition] = {
+            # -- IDLE ------------------------------------------------------
+            (_State.IDLE, _Event.RISING_EDGE): _Transition(
+                _State.ANIMAL_PRESENT, self._on_rising_edge
+            ),
+            (_State.IDLE, _Event.FALLING_EDGE): _Transition(_State.IDLE, noop),
+            (_State.IDLE, _Event.RFID_READ): _Transition(_State.IDLE, noop),
+            (_State.IDLE, _Event.TIMEOUT): _Transition(_State.IDLE, noop),
+            # -- ANIMAL_PRESENT (beam broken, awaiting RFID) ---------------
+            (_State.ANIMAL_PRESENT, _Event.RISING_EDGE): _Transition(
+                _State.ANIMAL_PRESENT, noop
+            ),
+            (_State.ANIMAL_PRESENT, _Event.FALLING_EDGE): _Transition(
+                _State.IDLE, self._on_left_unconfirmed
+            ),
+            (_State.ANIMAL_PRESENT, _Event.RFID_READ): _Transition(
+                _State.ANIMAL_CONFIRMED, self._on_rfid_confirmed
+            ),
+            (_State.ANIMAL_PRESENT, _Event.TIMEOUT): _Transition(
+                _State.ANIMAL_CONFIRMED, self._on_rfid_timeout
+            ),
+            # -- ANIMAL_CONFIRMED (beam broken, RFID matched) --------------
+            (_State.ANIMAL_CONFIRMED, _Event.RISING_EDGE): _Transition(
+                _State.ANIMAL_CONFIRMED, noop
+            ),
+            (_State.ANIMAL_CONFIRMED, _Event.FALLING_EDGE): _Transition(
+                _State.IDLE, self._on_left_confirmed
+            ),
+            (_State.ANIMAL_CONFIRMED, _Event.RFID_READ): _Transition(
+                _State.ANIMAL_CONFIRMED, noop
+            ),
+            (_State.ANIMAL_CONFIRMED, _Event.TIMEOUT): _Transition(
+                _State.ANIMAL_CONFIRMED, noop
+            ),
+        }
+
+    # ---- Detector protocol: registration ---------------------------------
+
+    def register_event(
+        self,
+        event: DetectorEvent,
+        callback: Callable[[DetectionResult], None],
+    ) -> None:
+        """Subscribe *callback* to a specific :class:`DetectorEvent`."""
+        self._callbacks[event].append(callback)
+
+    def register_animal(self, animals: dict[str, str]) -> None:
+        """Register known animals.
 
         Parameters
         ----------
-        animal_db : dict[str, str]
-            Mapping from animal ID to animal name.
-        rfid_reader : RFIDReader
-            RFID reader used to fetch tags.
-        beam_break_sensor : ThroughBeamSensor
-            Through-beam sensor used to detect presence.
-        detection_frequency : int
-            Polling interval in milliseconds.
+        animals:
+            Mapping of ``animal_id`` (as stored on the RFID tag) to a
+            human-readable ``animal_name``.
         """
-        super().__init__()
-        self.detection_frequency = 1000 / 1000.0
+        self._animals.update(animals)
 
-        self._rfid_reader = rfid_reader
-        self._beam_break_sensor = beam_break_sensor
-
-        self._is_running = False
-        self._thread: Thread = Thread(target=self._worker)
-
-    def _worker(self) -> None:
-        """Run the background detection loop."""
-        animal_present_prev = False
-        cached_tag: RFIDTag | None = None
-        timeout_seconds = 5
-
-        def emit(
-            *,
-            timestamp: float,
-            animal_id: str | None,
-            animal_name: str | None,
-            error: bool = False,
-        ) -> None:
-            self.process_detection(
-                DetectionResult(
-                    timestamp=timestamp,
-                    animal_id=animal_id,
-                    animal_name=animal_name,
-                    error=error,
-                )
-            )
-
-        def emit_error() -> None:
-            emit(timestamp=time(), animal_id=None, animal_name=None, error=True)
-
-        while self._is_running:
-            has_animal = self._beam_break_sensor.read()
-
-            if not has_animal:
-                animal_present_prev = False
-                cached_tag = None
-                sleep(self.detection_frequency)
-                continue
-
-            if animal_present_prev:
-                if cached_tag is not None:
-                    emit(
-                        timestamp=cached_tag.detect_time,
-                        animal_id=cached_tag.animal_id,
-                        animal_name=self._animal_db.get(cached_tag.animal_id),
-                        error=False,
-                    )
-                sleep(self.detection_frequency)
-                continue
-
-            animal_present_prev = True
-            deadline = time() + timeout_seconds
-
-            tag: RFIDTag | None = None
-            while self._is_running and time() < deadline:
-                tag = self._rfid_reader.read()
-                if tag is not None:
-                    break
-                sleep(1)
-
-            if tag is None:
-                emit_error()
-                sleep(self.detection_frequency)
-                continue
-
-            animal_name = self._animal_db.get(tag.animal_id)
-            if not animal_name:
-                emit_error()
-                sleep(self.detection_frequency)
-                continue
-
-            cached_tag = tag
-            emit(
-                timestamp=tag.detect_time,
-                animal_id=tag.animal_id,
-                animal_name=animal_name,
-                error=False,
-            )
-            sleep(self.detection_frequency)
-
-    def _cleanup(self) -> None:
-        """Release hardware resources."""
-        self._rfid_reader.close()
-        self._beam_break_sensor.close()
+    # ---- Detector protocol: lifecycle ------------------------------------
 
     def begin(self) -> None:
-        """Start detection in a background thread."""
-        if self._is_running:
-            return
-
-        self._is_running = True
+        """Start the background detection loop."""
+        self._stop_event.clear()
+        self._thread = Thread(target=self._worker, daemon=True)
         self._thread.start()
 
     def quit(self) -> None:
-        """Stop detection and close resources."""
-        if not self._is_running:
+        """Stop the background detection loop and release resources."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join()
+            self._thread = None
+
+    # ---- Detector protocol: properties -----------------------------------
+
+    @property
+    def current_animal(self) -> str | None:
+        """Return the ``animal_id`` of the animal currently on the sensor."""
+        with self._lock:
+            return self._current_animal
+
+    @property
+    def animal_list(self) -> list[str]:
+        """Return a list of registered animal IDs."""
+        return list(self._animals.keys())
+
+    # ---- internal: worker loop -------------------------------------------
+
+    def _worker(self) -> None:
+        """Background loop: poll beam sensor, drive state machine."""
+        while not self._stop_event.is_set():
+            now = time()
+            events: list[_Event] = []
+
+            # 1. Edge detection (beam break sensor)
+            edge = self._detect_edge()
+            if edge is not None:
+                events.append(edge)
+
+            # 2. RFID read — the reader has its own background thread;
+            #    we just grab the latest result and let the state table
+            #    decide whether the event is relevant.
+            rfid = self._try_read_rfid(now)
+            if rfid is not None:
+                events.append(rfid)
+
+            # 3. Timeout check
+            timeout = self._check_timeout(now)
+            if timeout is not None:
+                events.append(timeout)
+
+            # 4. Dispatch all collected events (priority: edge > rfid > timeout)
+            with self._lock:
+                for evt in events:
+                    self._dispatch(evt)
+
+            sleep(self._poll_interval)
+
+    # ---- internal: sensor helpers ----------------------------------------
+
+    def _detect_edge(self) -> _Event | None:
+        """Read beam sensor and return a rising / falling edge or *None*."""
+        current = self._beam_break_sensor.read()
+        edge: _Event | None = None
+
+        if current and not self._prev_beam:
+            edge = _Event.RISING_EDGE
+        elif not current and self._prev_beam:
+            edge = _Event.FALLING_EDGE
+
+        self._prev_beam = current
+        return edge
+
+    def _try_read_rfid(self, now: float) -> _Event | None:
+        """Read RFID on-demand and return ``RFID_READ`` if a valid tag is available.
+
+        The RFID reader maintains its own background thread; we simply call
+        ``read()`` to retrieve the latest result when the state machine needs it.
+        """
+        tag = self._rfid_reader.read()
+        if tag is None:
+            return None
+        if now - tag.detect_time <= self._rfid_timeout:
+            self._last_tag = tag
+            return _Event.RFID_READ
+        return None
+
+    def _check_timeout(self, now: float) -> _Event | None:
+        """Return ``TIMEOUT`` when the RFID window has expired."""
+        if self._state == _State.ANIMAL_PRESENT:
+            if self._edge_time > 0 and (now - self._edge_time) > self._rfid_timeout:
+                return _Event.TIMEOUT
+        return None
+
+    # ---- internal: state-machine dispatch --------------------------------
+
+    def _dispatch(self, event: _Event) -> None:
+        transition = self._table.get((self._state, event))
+        if transition is None:
             return
 
-        self._is_running = False
-        self._thread.join()
+        transition.action()
+        self._state = transition.next_state
 
-        self._cleanup()
+    # ---- internal: result helpers ----------------------------------------
+
+    def _resolve_name(self, animal_id: str | None) -> str | None:
+        """Look up the display name for an animal ID."""
+        if animal_id is None:
+            return None
+        return self._animals.get(animal_id)
+
+    def _make_result(
+        self,
+        *,
+        animal_id: str | None = None,
+        error: bool = False,
+    ) -> DetectionResult:
+        return DetectionResult(
+            timestamp=time(),
+            animal_id=animal_id,
+            animal_name=self._resolve_name(animal_id),
+            error=error,
+        )
+
+    def _emit(self, event: DetectorEvent, result: DetectionResult) -> None:
+        """Notify all subscribers of *event*."""
+        for cb in self._callbacks[event]:
+            cb(result)
+
+    # ---- state-machine actions -------------------------------------------
+
+    def _noop(self) -> None:
+        """No side-effect transition."""
+
+    def _on_rising_edge(self) -> None:
+        """Beam broken — start RFID acquisition window."""
+        self._edge_time = time()
+        self._last_tag = None
+
+    def _on_rfid_confirmed(self) -> None:
+        """RFID read while beam is broken — animal entered."""
+        assert self._last_tag is not None
+        animal_id = self._last_tag.animal_id
+        self._current_animal = animal_id
+        self._emit(
+            DetectorEvent.ANIMAL_ENTERED,
+            self._make_result(animal_id=animal_id),
+        )
+
+    def _on_rfid_timeout(self) -> None:
+        """10 s window expired without valid RFID — unknown animal entered."""
+        self._current_animal = None
+        self._emit(
+            DetectorEvent.ANIMAL_ENTERED,
+            self._make_result(error=True),
+        )
+
+    def _on_left_confirmed(self) -> None:
+        """Beam restored after RFID confirmation — animal left."""
+        animal_id = self._last_tag.animal_id if self._last_tag else self._current_animal
+        self._emit(
+            DetectorEvent.ANIMAL_LEFT,
+            self._make_result(animal_id=animal_id),
+        )
+        self._current_animal = None
+        self._last_tag = None
+        self._edge_time = 0.0
+
+    def _on_left_unconfirmed(self) -> None:
+        """Beam restored before RFID arrived — animal left without ID."""
+        self._emit(
+            DetectorEvent.ANIMAL_LEFT,
+            self._make_result(),
+        )
+        self._current_animal = None
+        self._last_tag = None
+        self._edge_time = 0.0
