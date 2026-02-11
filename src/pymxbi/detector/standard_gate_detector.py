@@ -1,278 +1,349 @@
-from dataclasses import dataclass, field
-from enum import StrEnum, auto
+"""Standard dual-beam gate detector with RFID.
+
+Uses two through-beam sensors to determine traversal direction and an RFID
+reader to identify the animal, driven by a table-driven state machine.
+"""
+
+from __future__ import annotations
+
+from enum import Enum, auto
+from threading import Event, Lock, Thread
 from time import sleep, time
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from ..peripheral.beam_break_sensor import BeamBreakSensor
 from ..peripheral.rfid import RFIDReader, RFIDTag
 from .detector import DetectionResult, DetectorEvent
 
 
-@dataclass
-class GateSensors:
-    rfid: RFIDReader
-    b1: BeamBreakSensor
-    b2: BeamBreakSensor
+# ---------------------------------------------------------------------------
+# State-machine enums
+# ---------------------------------------------------------------------------
 
 
-@dataclass
-class _GateSensorState:
-    now: float
-    rfid_tag: RFIDTag | None
-    b1_on: bool
-    b1_off: bool
-    b2_on: bool
-    b2_off: bool
+class _State(Enum):
+    """Internal states of the gate detector.
 
+    The animal crosses two beams (b1, b2) in sequence.  The direction is
+    determined by which beam breaks first:
 
-class _DetectorState(StrEnum):
+    * **Enter**: b1 breaks → b2 breaks → b1 clears → b2 clears
+    * **Leave**: b2 breaks → b1 breaks → b2 clears → b1 clears
+    """
+
     IDLE = auto()
-    DETECTING = auto()
-    FAULT = auto()
+
+    ENTER_1 = auto()  # b1 broken, waiting for b2
+    ENTER_2 = auto()  # b1+b2 broken, waiting for b1 clear
+    ENTER_3 = auto()  # b2 broken, b1 clear, waiting for b2 clear
+
+    LEAVE_1 = auto()  # b2 broken, waiting for b1
+    LEAVE_2 = auto()  # b1+b2 broken, waiting for b2 clear
+    LEAVE_3 = auto()  # b1 broken, b2 clear, waiting for b1 clear
 
 
-class _Direction(StrEnum):
-    ENTER = auto()
-    LEAVE = auto()
+class _Event(Enum):
+    """Edge events from the two beam sensors."""
+
+    B1_RISING = auto()  # Beam 1 just broken
+    B1_FALLING = auto()  # Beam 1 just restored
+    B2_RISING = auto()  # Beam 2 just broken
+    B2_FALLING = auto()  # Beam 2 just restored
 
 
-@dataclass
-class _DetectorCtx:
-    direction: _Direction
-    step: int
-    start_ts: float
-    last_ts: float
-    tags: dict[str, RFIDTag] = field(default_factory=dict)
+# ---------------------------------------------------------------------------
+# Transition-table type
+# ---------------------------------------------------------------------------
+
+_Action = Callable[[], None]
 
 
-class GateStateMachine:
-    def __init__(self, detector: StandardGateDetector) -> None:
-        self._detector = detector
-        self._state: _DetectorState = _DetectorState.IDLE
-        self._ctx: _DetectorCtx | None = None
+class _Transition(NamedTuple):
+    next_state: _State
+    action: _Action
 
-    def transition(self, state: _GateSensorState) -> None:
-        if self._ctx is not None and state.rfid_tag is not None:
-            self._ctx.last_ts = state.now
-            if state.rfid_tag.detect_time > self._ctx.start_ts:
-                if state.rfid_tag.animal_id is not None:
-                    self._ctx.tags[state.rfid_tag.animal_id] = state.rfid_tag
 
-        match self._state:
-            case _DetectorState.IDLE:
-                self._handle_idle(state)
-            case _DetectorState.DETECTING:
-                self._handle_detecting(state)
-            case _DetectorState.FAULT:
-                self._handle_fault(state)
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
-    def _handle_idle(self, state: _GateSensorState) -> None:
-        first_on = (state.b1_on and not state.b2_on) or (
-            state.b2_on and not state.b1_on
-        )
+_POLL_INTERVAL_S: float = 0.01
 
-        if first_on:
-            direction = _Direction.ENTER if state.b1_on else _Direction.LEAVE
-            self._ctx = _DetectorCtx(
-                direction=direction,
-                step=1,
-                start_ts=state.now,
-                last_ts=state.now,
-            )
-            self._state = _DetectorState.DETECTING
-            return
 
-        if state.b1_on and state.b2_on:
-            self._state = _DetectorState.FAULT
-            return
-
-    def _handle_detecting(self, state: _GateSensorState) -> None:
-        assert self._ctx is not None
-        self._ctx.last_ts = state.now
-
-        if self._ctx.direction == _Direction.ENTER:
-            self._advance_enter(state)
-        else:
-            self._advance_leave(state)
-
-    def _advance_enter(self, state: _GateSensorState) -> None:
-        assert self._ctx is not None
-
-        step = self._ctx.step
-
-        if step == 1:
-            if state.b2_on:
-                self._ctx.step = 2
-                return
-
-            if state.b1_off:
-                self._state = _DetectorState.IDLE
-                return
-
-        elif step == 2:
-            if state.b1_off:
-                self._ctx.step = 3
-                return
-
-            if state.b2_off:
-                self._ctx.step = 1
-                return
-
-        elif step == 3:
-            if state.b2_off:
-                self._finish(_Direction.ENTER)
-                return
-
-            if state.b1_on:
-                self._ctx.step = 2
-                return
-
-    def _advance_leave(self, state: _GateSensorState) -> None:
-        assert self._ctx is not None
-
-        step = self._ctx.step
-
-        if step == 1:
-            if state.b1_on:
-                self._ctx.step = 2
-                return
-
-            if state.b2_off:
-                self._state = _DetectorState.IDLE
-                return
-
-        elif step == 2:
-            if state.b2_off:
-                self._ctx.step = 3
-                return
-
-            if state.b1_off:
-                self._ctx.step = 1
-                return
-
-        elif step == 3:
-            if state.b1_off:
-                self._finish(_Direction.LEAVE)
-                return
-            if state.b2_on:
-                self._ctx.step = 2
-                return
-
-    def _finish(self, direction: _Direction):
-        assert self._ctx is not None
-
-        last_ts = self._ctx.last_ts
-        animal_db = self._detector._animal_db
-
-        results = [
-            DetectionResult(
-                timestamp=last_ts, animal_id=animal_id, animal_name=animal_name
-            )
-            for tag in self._ctx.tags.values()
-            if (animal_id := tag.animal_id) is not None
-            and (animal_name := animal_db.get(animal_id)) is not None
-        ]
-
-        if not results:
-            results.append(
-                DetectionResult(
-                    timestamp=self._ctx.last_ts,
-                    animal_id=None,
-                    animal_name=None,
-                )
-            )
-
-        handler = (
-            self._handle_animal_entered
-            if direction == _Direction.ENTER
-            else self._handle_animal_left
-        )
-        for result in results:
-            handler(result)
-
-        self._state = _DetectorState.IDLE
-        self._ctx = None
-
-    def _handle_fault(self, state: _GateSensorState) -> None: ...
-    def _handle_animal_entered(self, result: DetectionResult) -> None:
-        self._detector._emit_event(DetectorEvent.ANIMAL_ENTERED, result)
-
-    def _handle_animal_left(self, result: DetectionResult) -> None:
-        self._detector._emit_event(DetectorEvent.ANIMAL_LEFT, result)
+# ---------------------------------------------------------------------------
+# Detector
+# ---------------------------------------------------------------------------
 
 
 class StandardGateDetector:
-    def __init__(self, sensors: GateSensors) -> None:
+    """Dual-beam gate detector with RFID identification.
+
+    Implements the :class:`Detector` protocol.
+
+    Detection logic
+    ---------------
+    * Two beams (b1, b2) are monitored for rising/falling edges.
+    * The beam that breaks first determines direction: b1 first → *enter*,
+      b2 first → *leave*.
+    * While the crossing sequence is in progress, RFID tags are collected.
+    * When the sequence completes, ``ANIMAL_ENTERED`` or ``ANIMAL_LEFT``
+      is emitted for each collected tag.  If no tags were collected,
+      ``UNKNOWN_ANIMAL_ENTERED`` is emitted instead.
+
+    Parameters
+    ----------
+    rfid_reader : RFIDReader
+        RFID reader for animal identification.
+    b1 : BeamBreakSensor
+        First beam sensor (entry side).
+    b2 : BeamBreakSensor
+        Second beam sensor (exit side).
+    poll_interval : float
+        Seconds between sensor polls.
+    """
+
+    # ---- construction ----------------------------------------------------
+
+    def __init__(
+        self,
+        rfid_reader: RFIDReader,
+        b1: BeamBreakSensor,
+        b2: BeamBreakSensor,
+        poll_interval: float = _POLL_INTERVAL_S,
+    ) -> None:
+        self._rfid_reader = rfid_reader
+        self._b1 = b1
+        self._b2 = b2
+        self._poll_interval = poll_interval
+
+        # Event callbacks: DetectorEvent -> list of subscribers
         self._callbacks: dict[
             DetectorEvent, list[Callable[[DetectionResult], None]]
-        ] = {}
+        ] = {evt: [] for evt in DetectorEvent}
 
-        self._animal_db: dict[str, str] = {}
-        self._sensors = sensors
+        # State-machine bookkeeping
+        self._state: _State = _State.IDLE
+        self._prev_b1: bool = False
+        self._prev_b2: bool = False
+        self._current_animal: str | None = None
 
-        self._state_machine = GateStateMachine(self)
+        # RFID tags collected during the current crossing sequence
+        self._sequence_start: float = 0.0
+        self._collected_tags: dict[str, RFIDTag] = {}
 
-        self._running = False
+        # Thread control
+        self._lock = Lock()
+        self._stop_event = Event()
+        self._thread: Thread | None = None
+
+        # fmt: off
+        # ---- transition table ------------------------------------------------
+        noop = self._noop
+        S = _State
+        E = _Event
+        T = _Transition
+        self._table: dict[tuple[_State, _Event], _Transition] = {
+            # -- IDLE ----------------------------------------------------------
+            (S.IDLE, E.B1_RISING):  T(S.ENTER_1, self._on_start),
+            (S.IDLE, E.B1_FALLING): T(S.IDLE, noop),
+            (S.IDLE, E.B2_RISING):  T(S.LEAVE_1, self._on_start),
+            (S.IDLE, E.B2_FALLING): T(S.IDLE, noop),
+            # -- ENTER_1 (b1 broken, waiting for b2) ---------------------------
+            (S.ENTER_1, E.B1_RISING):  T(S.ENTER_1, noop),
+            (S.ENTER_1, E.B1_FALLING): T(S.IDLE, self._on_cancel),
+            (S.ENTER_1, E.B2_RISING):  T(S.ENTER_2, noop),
+            (S.ENTER_1, E.B2_FALLING): T(S.ENTER_1, noop),
+            # -- ENTER_2 (b1+b2 broken, waiting for b1 clear) -----------------
+            (S.ENTER_2, E.B1_RISING):  T(S.ENTER_2, noop),
+            (S.ENTER_2, E.B1_FALLING): T(S.ENTER_3, noop),
+            (S.ENTER_2, E.B2_RISING):  T(S.ENTER_2, noop),
+            (S.ENTER_2, E.B2_FALLING): T(S.ENTER_1, noop),
+            # -- ENTER_3 (b2 broken, b1 clear, waiting for b2 clear) ----------
+            (S.ENTER_3, E.B1_RISING):  T(S.ENTER_2, noop),
+            (S.ENTER_3, E.B1_FALLING): T(S.ENTER_3, noop),
+            (S.ENTER_3, E.B2_RISING):  T(S.ENTER_3, noop),
+            (S.ENTER_3, E.B2_FALLING): T(S.IDLE, self._on_entered),
+            # -- LEAVE_1 (b2 broken, waiting for b1) ---------------------------
+            (S.LEAVE_1, E.B1_RISING):  T(S.LEAVE_2, noop),
+            (S.LEAVE_1, E.B1_FALLING): T(S.LEAVE_1, noop),
+            (S.LEAVE_1, E.B2_RISING):  T(S.LEAVE_1, noop),
+            (S.LEAVE_1, E.B2_FALLING): T(S.IDLE, self._on_cancel),
+            # -- LEAVE_2 (b1+b2 broken, waiting for b2 clear) -----------------
+            (S.LEAVE_2, E.B1_RISING):  T(S.LEAVE_2, noop),
+            (S.LEAVE_2, E.B1_FALLING): T(S.LEAVE_1, noop),
+            (S.LEAVE_2, E.B2_RISING):  T(S.LEAVE_2, noop),
+            (S.LEAVE_2, E.B2_FALLING): T(S.LEAVE_3, noop),
+            # -- LEAVE_3 (b1 broken, b2 clear, waiting for b1 clear) ----------
+            (S.LEAVE_3, E.B1_RISING):  T(S.LEAVE_3, noop),
+            (S.LEAVE_3, E.B1_FALLING): T(S.IDLE, self._on_left),
+            (S.LEAVE_3, E.B2_RISING):  T(S.LEAVE_2, noop),
+            (S.LEAVE_3, E.B2_FALLING): T(S.LEAVE_3, noop),
+        }
+        # fmt: on
+
+    # ---- Detector protocol: registration ---------------------------------
 
     def register_event(
-        self, event: DetectorEvent, callback: Callable[[DetectionResult], None]
+        self,
+        event: DetectorEvent,
+        callback: Callable[[DetectionResult], None],
     ) -> None:
-        if event not in self._callbacks:
-            self._callbacks[event] = []
+        """Subscribe *callback* to a specific :class:`DetectorEvent`."""
         self._callbacks[event].append(callback)
 
-    def register_animal(self, animals: dict[str, str]) -> None:
-        self._animal_db.update(animals)
+    # ---- Detector protocol: lifecycle ------------------------------------
 
     def begin(self) -> None:
-        self._running = True
+        """Start the background detection loop."""
+        if self._thread and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self._thread = Thread(
+            target=self._worker,
+            name="GateDetectorWorker",
+            daemon=True,
+        )
+        self._thread.start()
 
     def quit(self) -> None:
-        self._running = False
+        """Stop the background detection loop and release resources."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
 
-    def _emit_event(
-        self, event: DetectorEvent, detection_result: DetectionResult
-    ) -> None:
-        """Emit an event to registered callbacks."""
-        if event not in self._callbacks:
-            return
-        for callback in self._callbacks[event]:
-            callback(detection_result)
+    # ---- Detector protocol: properties -----------------------------------
+
+    @property
+    def current_animal(self) -> str | None:
+        """Return the ``animal_id`` of the animal currently on the sensor."""
+        with self._lock:
+            return self._current_animal
+
+    # ---- internal: worker loop -------------------------------------------
 
     def _worker(self) -> None:
-        prev_b1 = self._sensors.b1.read()
-        prev_b2 = self._sensors.b2.read()
-        while self._running:
-            now = time()
+        """Background loop: poll beam sensors and RFID, drive state machine."""
+        while not self._stop_event.is_set():
+            events: list[_Event] = []
 
-            tag = self._sensors.rfid.read()
+            # 1. Edge detection for both beams
+            edges = self._detect_edges()
+            events.extend(edges)
 
-            b1 = self._sensors.b1.read()
-            b2 = self._sensors.b2.read()
+            # 2. Collect RFID tags while a crossing sequence is active
+            if self._state != _State.IDLE:
+                self._collect_rfid()
 
-            b1_on = b1 and not prev_b1
-            b1_off = not b1 and prev_b1
-            b2_on = b2 and not prev_b2
-            b2_off = not b2 and prev_b2
+            # 3. Dispatch all collected events
+            with self._lock:
+                for evt in events:
+                    self._dispatch(evt)
 
-            state = _GateSensorState(
-                now=now,
-                rfid_tag=tag,
-                b1_on=b1_on,
-                b1_off=b1_off,
-                b2_on=b2_on,
-                b2_off=b2_off,
+            sleep(self._poll_interval)
+
+    # ---- internal: sensor helpers ----------------------------------------
+
+    def _detect_edges(self) -> list[_Event]:
+        """Read both beam sensors and return edge events."""
+        b1 = self._b1.read()
+        b2 = self._b2.read()
+        edges: list[_Event] = []
+
+        if b1 and not self._prev_b1:
+            edges.append(_Event.B1_RISING)
+        elif not b1 and self._prev_b1:
+            edges.append(_Event.B1_FALLING)
+
+        if b2 and not self._prev_b2:
+            edges.append(_Event.B2_RISING)
+        elif not b2 and self._prev_b2:
+            edges.append(_Event.B2_FALLING)
+
+        self._prev_b1 = b1
+        self._prev_b2 = b2
+        return edges
+
+    def _collect_rfid(self) -> None:
+        """Grab the latest RFID tag and stash it if it's fresh."""
+        tag = self._rfid_reader.read()
+        if tag is None:
+            return
+        if tag.animal_id is None:
+            return
+        if tag.detect_time > self._sequence_start:
+            self._collected_tags[tag.animal_id] = tag
+
+    # ---- internal: state-machine dispatch --------------------------------
+
+    def _dispatch(self, event: _Event) -> None:
+        transition = self._table.get((self._state, event))
+        if transition is None:
+            return
+
+        transition.action()
+        self._state = transition.next_state
+
+    # ---- internal: result helpers ----------------------------------------
+
+    def _make_result(
+        self,
+        *,
+        animal_id: str | None = None,
+        error: bool = False,
+    ) -> DetectionResult:
+        return DetectionResult(
+            timestamp=time(),
+            animal_id=animal_id,
+            error=error,
+        )
+
+    def _emit(self, event: DetectorEvent, result: DetectionResult) -> None:
+        """Notify all subscribers of *event*."""
+        for cb in self._callbacks[event]:
+            cb(result)
+
+    def _reset_sequence(self) -> None:
+        """Clear crossing-sequence bookkeeping."""
+        self._sequence_start = 0.0
+        self._collected_tags.clear()
+
+    # ---- state-machine actions -------------------------------------------
+
+    def _noop(self) -> None:
+        """No side-effect transition."""
+
+    def _on_start(self) -> None:
+        """First beam broken — begin a crossing sequence."""
+        self._sequence_start = time()
+        self._collected_tags.clear()
+
+    def _on_cancel(self) -> None:
+        """Sequence aborted (beam restored before completion)."""
+        self._reset_sequence()
+
+    def _on_entered(self) -> None:
+        """Full enter sequence completed — animal entered."""
+        self._finish(DetectorEvent.ANIMAL_ENTERED)
+
+    def _on_left(self) -> None:
+        """Full leave sequence completed — animal left."""
+        self._finish(DetectorEvent.ANIMAL_LEFT)
+
+    def _finish(self, event: DetectorEvent) -> None:
+        """Emit results for a completed crossing sequence."""
+        if self._collected_tags:
+            for animal_id in self._collected_tags:
+                self._emit(event, self._make_result(animal_id=animal_id))
+                if event == DetectorEvent.ANIMAL_ENTERED:
+                    self._current_animal = animal_id
+                else:
+                    self._current_animal = None
+        else:
+            self._emit(
+                DetectorEvent.UNKNOWN_ANIMAL_ENTERED,
+                self._make_result(error=True),
             )
 
-            self._state_machine.transition(state)
-
-            prev_b1 = b1
-            prev_b2 = b2
-
-            sleep(0.01)
-
-    @property
-    def current_animal(self) -> str | None: ...
-
-    @property
-    def animal_list(self) -> list[str]: ...
+        self._reset_sequence()

@@ -11,63 +11,43 @@ class DetectorEnum(StrEnum):
     FUSION_CONTINUOUS = auto()
 
 
-class DetectorState(StrEnum):
-    """Detector finite states.
-
-    Attributes
-    ----------
-    IDLE
-        No animal is currently detected.
-    ANIMAL_PRESENT
-        An animal is currently detected.
-    FAULT
-        A fault was detected and the detector is in an error state.
-    """
-
-    IDLE = auto()
-    ANIMAL_PRESENT = auto()
-    FAULT = auto()
-
-
 class DetectorEvent(StrEnum):
     """Detector events emitted on state transitions.
 
     Attributes
     ----------
     ANIMAL_ENTERED
-        Transition from idle to an animal being present.
-    ANIMAL_RETURNED
-        Animal reappeared after a brief absence.
-    ANIMAL_CHANGED
-        A different animal replaced the currently detected one.
+        An identified animal has been detected.
     ANIMAL_LEFT
-        Transition from an animal being present to idle.
-    ANIMAL_REMAINED
-        The same animal remains present across cycles.
+        The animal is no longer detected.
+    UNKNOWN_ANIMAL_ENTERED
+        An animal was detected but could not be identified.
     FAULT_DETECTED
-        A fault occurred while detecting.
+        A fault occurred while reading sensor inputs.
     """
 
     ANIMAL_ENTERED = auto()
     ANIMAL_LEFT = auto()
+    UNKNOWN_ANIMAL_ENTERED = auto()
     FAULT_DETECTED = auto()
 
 
 @dataclass
 class DetectionResult:
-    """Detection result from a detector input cycle.
+    """Detection result emitted alongside a :class:`DetectorEvent`.
 
-    Parameters
+    Attributes
     ----------
-    animal_name : str | None, default=None
-        Name of the detected animal, if any.
-    error : bool, default=False
-        Whether a fault was detected while reading inputs.
+    timestamp : float
+        Unix timestamp of the detection.
+    animal_id : str | None
+        Identifier of the detected animal, or ``None`` if unknown.
+    error : bool
+        Whether a fault was detected while reading sensor inputs.
     """
 
     timestamp: float = 0.0
     animal_id: str | None = None
-    animal_name: str | None = None
     error: bool = False
 
 
@@ -76,14 +56,9 @@ class Detector(Protocol):
         self, event: DetectorEvent, callback: Callable[[DetectionResult], None]
     ) -> None: ...
 
-    def register_animal(self, animals: dict[str, str]) -> None: ...
-
     def begin(self) -> None: ...
 
     def quit(self) -> None: ...
 
     @property
     def current_animal(self) -> str | None: ...
-
-    @property
-    def animal_list(self) -> list[str]: ...

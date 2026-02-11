@@ -21,18 +21,19 @@ from .detector import DetectionResult, DetectorEvent
 class _State(Enum):
     """Internal states of the fusion detector."""
 
-    IDLE = auto()              # Beam clear, no animal
-    ANIMAL_PRESENT = auto()    # Beam broken, waiting for RFID (within 10 s)
+    IDLE = auto()  # Beam clear, no animal
+    ANIMAL_PRESENT = auto()  # Beam broken, waiting for RFID (within 10 s)
     ANIMAL_CONFIRMED = auto()  # Beam broken and RFID matched
+    ANIMAL_UNCONFIRMED = auto()  # Beam broken, RFID timed out (unknown animal)
 
 
 class _Event(Enum):
     """Events that drive the state machine."""
 
-    RISING_EDGE = auto()   # Beam just broken  (animal enters)
+    RISING_EDGE = auto()  # Beam just broken  (animal enters)
     FALLING_EDGE = auto()  # Beam just restored (animal leaves)
-    RFID_READ = auto()     # Valid RFID tag obtained within window
-    TIMEOUT = auto()       # 10 s elapsed without RFID while beam broken
+    RFID_READ = auto()  # Valid RFID tag obtained within window
+    TIMEOUT = auto()  # 10 s elapsed without RFID while beam broken
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +71,9 @@ class FusionContinuousDetector:
     * **Rising edge** (beam broken — animal arrives): start a 10 s window to
       acquire an RFID tag.  If a tag whose ``detect_time`` falls within the
       window is read, emit ``ANIMAL_ENTERED`` with the animal's identity.
-      If the window expires without a valid tag, emit ``ANIMAL_ENTERED``
-      with ``animal_id=None`` and ``error=True`` (unknown animal).
+      If the window expires without a valid tag, emit
+      ``UNKNOWN_ANIMAL_ENTERED`` with ``animal_id=None`` and ``error=True``
+      (unknown animal).
     * **Falling edge** (beam restored — animal leaves): emit ``ANIMAL_LEFT``
       immediately — no recent RFID result is required.
     """
@@ -107,7 +109,8 @@ class FusionContinuousDetector:
         self._stop_event = Event()
         self._thread: Thread | None = None
 
-        # ---- transition table (instance-level, bound methods) ------------
+        # fmt: off
+        # ---- transition table ------------
         noop = self._noop
         self._table: dict[tuple[_State, _Event], _Transition] = {
             # -- IDLE ------------------------------------------------------
@@ -118,14 +121,20 @@ class FusionContinuousDetector:
             # -- ANIMAL_PRESENT (beam broken, awaiting RFID) ---------------
             (_State.ANIMAL_PRESENT, _Event.RISING_EDGE):  _Transition(_State.ANIMAL_PRESENT, noop),
             (_State.ANIMAL_PRESENT, _Event.FALLING_EDGE): _Transition(_State.IDLE, self._on_left_unconfirmed),
-            (_State.ANIMAL_PRESENT, _Event.RFID_READ):    _Transition(_State.ANIMAL_CONFIRMED, self._on_rfid_confirmed),
-            (_State.ANIMAL_PRESENT, _Event.TIMEOUT):      _Transition(_State.ANIMAL_CONFIRMED, self._on_rfid_timeout),
+            (_State.ANIMAL_PRESENT, _Event.RFID_READ):    _Transition(_State.ANIMAL_CONFIRMED, self._on_entered_confirmed),
+            (_State.ANIMAL_PRESENT, _Event.TIMEOUT):      _Transition(_State.ANIMAL_UNCONFIRMED, self._on_entered_unknown),
             # -- ANIMAL_CONFIRMED (beam broken, RFID matched) --------------
             (_State.ANIMAL_CONFIRMED, _Event.RISING_EDGE):  _Transition(_State.ANIMAL_CONFIRMED, noop),
             (_State.ANIMAL_CONFIRMED, _Event.FALLING_EDGE): _Transition(_State.IDLE, self._on_left_confirmed),
             (_State.ANIMAL_CONFIRMED, _Event.RFID_READ):    _Transition(_State.ANIMAL_CONFIRMED, noop),
             (_State.ANIMAL_CONFIRMED, _Event.TIMEOUT):      _Transition(_State.ANIMAL_CONFIRMED, noop),
+            # -- ANIMAL_UNCONFIRMED (beam broken, RFID timed out) ----------
+            (_State.ANIMAL_UNCONFIRMED, _Event.RISING_EDGE):  _Transition(_State.ANIMAL_UNCONFIRMED, noop),
+            (_State.ANIMAL_UNCONFIRMED, _Event.FALLING_EDGE): _Transition(_State.IDLE, self._on_left_unconfirmed),
+            (_State.ANIMAL_UNCONFIRMED, _Event.RFID_READ):    _Transition(_State.ANIMAL_UNCONFIRMED, noop),
+            (_State.ANIMAL_UNCONFIRMED, _Event.TIMEOUT):      _Transition(_State.ANIMAL_UNCONFIRMED, noop),
         }
+        # fmt: on
 
     # ---- Detector protocol: registration ---------------------------------
 
@@ -266,8 +275,8 @@ class FusionContinuousDetector:
         """Beam broken — start RFID acquisition window."""
         self._edge_time = time()
 
-    def _on_rfid_confirmed(self) -> None:
-        """RFID read while beam is broken — animal entered."""
+    def _on_entered_confirmed(self) -> None:
+        """RFID read while beam is broken — identified animal entered."""
         if self._last_tag is None:
             return
         animal_id = self._last_tag.animal_id
@@ -277,19 +286,17 @@ class FusionContinuousDetector:
             self._make_result(animal_id=animal_id),
         )
 
-    def _on_rfid_timeout(self) -> None:
-        """10 s window expired without valid RFID — unknown animal entered."""
+    def _on_entered_unknown(self) -> None:
+        """RFID window expired — unknown animal entered."""
         self._current_animal = None
         self._emit(
-            DetectorEvent.ANIMAL_ENTERED,
+            DetectorEvent.UNKNOWN_ANIMAL_ENTERED,
             self._make_result(error=True),
         )
 
     def _on_left_confirmed(self) -> None:
         """Beam restored after RFID confirmation — animal left."""
-        animal_id = (
-            self._last_tag.animal_id if self._last_tag else self._current_animal
-        )
+        animal_id = self._last_tag.animal_id if self._last_tag else self._current_animal
         self._emit(
             DetectorEvent.ANIMAL_LEFT,
             self._make_result(animal_id=animal_id),
