@@ -248,7 +248,7 @@ class DorsetLID665v42:
 
         self._parser = _LID665v42FrameParser()
 
-        self._reader_thread = Thread(target=self._read_loop, daemon=True)
+        self._reader_thread: Thread | None = None
 
         self._current_result: Result | None = None
         self._current_result_lock = Lock()
@@ -279,7 +279,10 @@ class DorsetLID665v42:
 
     def begin(self) -> None:
         """Start reading from the serial port on a daemon thread."""
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            return
         self._parser.reset()
+        self._reader_thread = Thread(target=self._read_loop, daemon=True)
         self._reader_thread.start()
 
     def open(self) -> None:

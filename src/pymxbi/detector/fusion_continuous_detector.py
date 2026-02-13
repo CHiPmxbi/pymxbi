@@ -150,6 +150,8 @@ class FusionContinuousDetector:
 
     def begin(self) -> None:
         """Start the background detection loop."""
+        if self._thread is not None and self._thread.is_alive():
+            return
         self._rfid_reader.open()
         self._rfid_reader.begin()
         self._stop_event.clear()
