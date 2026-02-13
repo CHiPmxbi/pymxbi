@@ -198,6 +198,9 @@ class StandardGateDetector:
         if self._thread and self._thread.is_alive():
             return
 
+        self._rfid_reader.open()
+        self._rfid_reader.begin()
+
         self._stop_event.clear()
         self._thread = Thread(
             target=self._worker,
@@ -212,6 +215,9 @@ class StandardGateDetector:
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
+        self._rfid_reader.close()
+        self._b1.close()
+        self._b2.close()
 
     # ---- Detector protocol: properties -----------------------------------
 

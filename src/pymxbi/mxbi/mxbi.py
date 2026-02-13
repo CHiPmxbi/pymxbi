@@ -54,6 +54,20 @@ class MXBI:
             raise RuntimeError(f"No detector with id {detector_id} found")
         return detector
 
+    def begin(self) -> None:
+        """Start all detectors and open all rewarders."""
+        for rewarder in self._rewarder.values():
+            rewarder.open()
+        for detector in self._detector.values():
+            detector.begin()
+
+    def quit(self) -> None:
+        """Stop all detectors and close all rewarders."""
+        for detector in self._detector.values():
+            detector.quit()
+        for rewarder in self._rewarder.values():
+            rewarder.close()
+
     @property
     def screen_size(self):
         return self._screen_size

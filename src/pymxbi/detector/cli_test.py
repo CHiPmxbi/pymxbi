@@ -57,8 +57,6 @@ def run():
     detector.register_event(DetectorEvent.ANIMAL_ENTERED, print_animal_entered)
     detector.register_event(DetectorEvent.ANIMAL_LEFT, print_animal_exited)
 
-    rfid_reader.open()
-    rfid_reader.begin()
     detector.begin()
 
     typer.echo("Listening detector events... (Ctrl+C to stop)")
@@ -69,8 +67,6 @@ def run():
         typer.echo("Exiting.")
     finally:
         detector.quit()
-        rfid_reader.close()
-        beam_break_sensor.close()
 
 
 def print_animal_entered(result) -> None:
