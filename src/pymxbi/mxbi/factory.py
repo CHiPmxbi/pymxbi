@@ -11,7 +11,6 @@ from ..detector import (
 )
 from ..peripheral.beam_break_sensor import RPIIRBreakBeamSensor
 from ..peripheral.rfid import DorsetLID665v42
-from ..platform import PlatformEnum
 from ..rewarder import (
     MockRewarder,
     Rewarder,
@@ -24,7 +23,6 @@ from .mxbi import MXBI
 
 class MXBIModel(BaseModel):
     mxbi_id: int = Field(default=0, ge=0)
-    platform: PlatformEnum = Field(default=PlatformEnum.RASPBIAN)
     screen_size: tuple[int, int] = Field(default=(1024, 600))
     rewarders: list[RewarderModel] = Field(default_factory=list)
     detectors: list[DetectorModel] = Field(default_factory=list)
