@@ -10,6 +10,7 @@ import numpy as np
 import pyaudio
 from pyaudio import PyAudio
 
+from pymxbi.audioplayer.frequency_response_table import FrequencyResponseTable
 from pymxbi.audioplayer.puretone_generator import PureToneUnit
 from pymxbi.infra.amixer import set_digital_volume, set_master_volume
 
@@ -82,6 +83,11 @@ class AudioPlayer:
         self._wav_cache: dict[Path, _WavCacheEntry] = {}
         self._done_lock = Lock()
         self._done_deque: deque[tuple[PlayTask, PlayResult]] = deque()
+        self._frequency_response_table = FrequencyResponseTable.from_file()
+
+    @property
+    def frequency_response_table(self) -> FrequencyResponseTable | None:
+        return self._frequency_response_table
 
     def close(self) -> None:
         self.cancel_all()
