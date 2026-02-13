@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/CHiPmxbi/pymxbi/compare/v0.1.8...v0.2.0) (2026-02-13)
+
+
+### Features
+
+* 🔥 remove platform enum from factory ([#24](https://github.com/CHiPmxbi/pymxbi/issues/24)) ([1980d13](https://github.com/CHiPmxbi/pymxbi/commit/1980d135075c071edc2842c87bbfaf880f3b24db))
+
 ## [0.1.8](https://github.com/CHiPmxbi/pymxbi/compare/v0.1.7...v0.1.8) (2026-02-13)
 
 
