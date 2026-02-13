@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/CHiPmxbi/pymxbi/compare/v0.2.0...v0.3.0) (2026-02-13)
+
+
+### Features
+
+* 🎨 add gitmoji support in renovate config ([6ba8888](https://github.com/CHiPmxbi/pymxbi/commit/6ba88885c496d951bc5b44ebe170fec3f46d2556))
+
 ## [0.2.0](https://github.com/CHiPmxbi/pymxbi/compare/v0.1.8...v0.2.0) (2026-02-13)
 
 
