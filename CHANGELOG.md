@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.0...v0.3.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* **ci:** use config-file instead of release-type for release-please ([#28](https://github.com/CHiPmxbi/pymxbi/issues/28)) ([56c2153](https://github.com/CHiPmxbi/pymxbi/commit/56c2153f24f3979b3d1111944e9ed67fd3d92270))
+
 ## [0.3.0](https://github.com/CHiPmxbi/pymxbi/compare/v0.2.0...v0.3.0) (2026-02-13)
 
 
