@@ -4,5 +4,13 @@
     "config:recommended"
   ],
   "prHourlyLimit": 0,
-  "commitMessageAction": "⬆️ update"
+  "commitMessageAction": "⬆️ update",
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "pymotego"
+      ],
+      "rangeStrategy": "bump"
+    }
+  ]
 }
