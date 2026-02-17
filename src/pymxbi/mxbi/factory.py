@@ -22,7 +22,7 @@ from .mxbi import MXBI
 
 
 class MXBIModel(BaseModel):
-    mxbi_id: int = Field(default=0, ge=0)
+    mxbi_id: str = Field(default="debug")
     screen_size: tuple[int, int] = Field(default=(1024, 600))
     rewarders: list[RewarderModel] = Field(default_factory=list)
     detectors: list[DetectorModel] = Field(default_factory=list)

@@ -378,7 +378,7 @@ wheels = [
 
 [[package]]
 name = "pymxbi"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "gpiozero" },
