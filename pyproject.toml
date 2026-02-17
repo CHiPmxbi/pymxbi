@@ -1,6 +1,6 @@
 [project]
 name = "pymxbi"
-version = "0.3.2"
+version = "0.3.3"
 description = "Python interfaces and drivers for MXBI"
 readme = "README.md"
 authors = [{ name = "HuYang", email = "huyangcommit@gmail.com" }]
