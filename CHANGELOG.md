@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.1...v0.3.2) (2026-02-17)
+
+
+### Bug Fixes
+
+* **renovate:** add bump rangeStrategy for pymotego ([#30](https://github.com/CHiPmxbi/pymxbi/issues/30)) ([53bc73c](https://github.com/CHiPmxbi/pymxbi/commit/53bc73c95c38e2b3692c68b416bed6c1b0d55236))
+
 ## [0.3.1](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.0...v0.3.1) (2026-02-17)
 
 
