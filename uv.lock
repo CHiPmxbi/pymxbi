@@ -365,20 +365,20 @@ wheels = [
 
 [[package]]
 name = "pymotego"
-version = "0.1.4"
+version = "0.1.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
     { name = "pyzmq" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a1/b0/21465c9443e0ef0b2dd1af57971514948e28760759a3c99070343cecb9fb/pymotego-0.1.4.tar.gz", hash = "sha256:b755ab20f7270573c1e8efe24007e2bb587b64bf07af2239ca6953234dfccdb2", size = 3088, upload-time = "2026-02-16T23:49:07.836Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/93/3a/2fe1145d41d8b16a3f479e18831e6ca60326f4cd3fc777ac8993450fc779/pymotego-0.1.5.tar.gz", hash = "sha256:62c0e109a282ec121188cf8cf5d14fd07a5e62d35b7f858d1367732e83a4a330", size = 3561, upload-time = "2026-02-18T01:44:30.808Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/3d/acb817ffa342ab252eb8836012585462eceaac3c9afd27449dbaaf28e504/pymotego-0.1.4-py3-none-any.whl", hash = "sha256:4bf51e5b823a103273f095f977e40a0c28e0b0ea20c243a08212dbba50e4a998", size = 4556, upload-time = "2026-02-16T23:49:08.54Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/f0/20a08f52378a1d682de9f26f5ad0d2117c1f4d8410f56b6293b1de4a3df4/pymotego-0.1.5-py3-none-any.whl", hash = "sha256:977cf44012c538db1e9a66e7cad66d9a0063e1b8a4f185823778339b19cba662", size = 5095, upload-time = "2026-02-18T01:44:29.658Z" },
 ]
 
 [[package]]
 name = "pymxbi"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "gpiozero" },
@@ -403,7 +403,7 @@ requires-dist = [
     { name = "pyaudio", specifier = ">=0.2.14" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyglet", specifier = ">=2.1.13" },
-    { name = "pymotego", specifier = ">=0.1.4" },
+    { name = "pymotego", specifier = ">=0.1.5" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "typer", specifier = ">=0.21.1" },
