@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.3...v0.3.4) (2026-02-18)
+
+
+### Bug Fixes
+
+* **deps:** ⬆️ update dependency pymotego to &gt;=0.1.5 ([#36](https://github.com/CHiPmxbi/pymxbi/issues/36)) ([3879e54](https://github.com/CHiPmxbi/pymxbi/commit/3879e54034bfdbbc5a41045754ed3852cf6e245a))
+
 ## [0.3.3](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.2...v0.3.3) (2026-02-17)
 
 
