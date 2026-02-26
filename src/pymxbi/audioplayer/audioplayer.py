@@ -1,4 +1,3 @@
-import wave
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -8,6 +7,7 @@ from typing import Callable
 
 import numpy as np
 import pyaudio
+import soundfile as sf
 from pyaudio import PyAudio
 
 from pymxbi.audioplayer.frequency_response_table import FrequencyResponseTable
@@ -32,11 +32,17 @@ DoneCallback = Callable[[PlayResult], None]
 
 
 @dataclass(frozen=True)
-class _WavCacheEntry:
+class LoadedWav:
     pcm_bytes: bytes
     sample_rate: int
     channels: int
     sample_width_bytes: int
+    pyaudio_format: int
+
+
+@dataclass(frozen=True)
+class _WavCacheEntry:
+    loaded_wav: LoadedWav
     mtime_ns: int
     size: int
 
@@ -137,6 +143,23 @@ class AudioPlayer:
         if on_done:
             task.on_finish(on_done)
 
+        try:
+            loaded_wav = self.load_wav(file_path)
+        except Exception as e:
+            self._finish_task(task, PlayResult(PlayStatus.ERROR, error=e))
+            return task
+
+        self._play_pcm_async(
+            task,
+            loaded_wav.pcm_bytes,
+            loaded_wav.sample_rate,
+            loaded_wav.channels,
+            loaded_wav.sample_width_bytes,
+            pyaudio_format=loaded_wav.pyaudio_format,
+        )
+        return task
+
+    def load_wav(self, file_path: Path) -> LoadedWav:
         wav_path = Path(file_path).expanduser().resolve()
         try:
             st = wav_path.stat()
@@ -151,43 +174,84 @@ class AudioPlayer:
                 and cached.mtime_ns == st.st_mtime_ns
                 and cached.size == st.st_size
             ):
-                self._play_pcm_async(
-                    task,
-                    cached.pcm_bytes,
-                    cached.sample_rate,
-                    cached.channels,
-                    cached.sample_width_bytes,
-                )
-                return task
+                return cached.loaded_wav
 
-        try:
-            with wave.open(str(wav_path), "rb") as wf:
-                channels = wf.getnchannels()
-                sample_rate = wf.getframerate()
-                sample_width_bytes = wf.getsampwidth()
-                frame_count = wf.getnframes()
-                pcm_bytes = wf.readframes(frame_count)
-        except BaseException as e:
-            self._finish_task(task, PlayResult(PlayStatus.ERROR, error=e))
-            return task
+        with sf.SoundFile(str(wav_path), "r") as sound_file:
+            channels = sound_file.channels
+            sample_rate = sound_file.samplerate
+            subtype = sound_file.subtype
+
+            if subtype == "PCM_16":
+                pcm = sound_file.read(dtype="int16", always_2d=False)
+                pcm_bytes = np.ascontiguousarray(pcm).tobytes()
+                loaded_wav = LoadedWav(
+                    pcm_bytes=pcm_bytes,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                    sample_width_bytes=2,
+                    pyaudio_format=pyaudio.paInt16,
+                )
+            elif subtype == "PCM_32":
+                pcm_i32 = sound_file.read(dtype="int32", always_2d=False)
+                pcm_bytes = np.ascontiguousarray(pcm_i32).tobytes()
+                loaded_wav = LoadedWav(
+                    pcm_bytes=pcm_bytes,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                    sample_width_bytes=4,
+                    pyaudio_format=pyaudio.paInt32,
+                )
+            elif subtype == "PCM_24":
+                raise ValueError(
+                    f"Unsupported WAV subtype for playback: {subtype} ({wav_path})"
+                )
+            elif subtype in {"FLOAT", "DOUBLE"}:
+                float_pcm = sound_file.read(dtype="float32", always_2d=False)
+                pcm_bytes = np.ascontiguousarray(float_pcm).tobytes()
+                loaded_wav = LoadedWav(
+                    pcm_bytes=pcm_bytes,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                    sample_width_bytes=4,
+                    pyaudio_format=pyaudio.paFloat32,
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported WAV subtype for playback: {subtype} ({wav_path})"
+                )
 
         if st is None:
             try:
                 st = wav_path.stat()
             except OSError:
                 st = None
+
         if st is not None:
             with self._wav_cache_lock:
                 self._wav_cache[wav_path] = _WavCacheEntry(
-                    pcm_bytes=pcm_bytes,
-                    sample_rate=sample_rate,
-                    channels=channels,
-                    sample_width_bytes=sample_width_bytes,
+                    loaded_wav=loaded_wav,
                     mtime_ns=st.st_mtime_ns,
                     size=st.st_size,
                 )
 
-        self._play_pcm_async(task, pcm_bytes, sample_rate, channels, sample_width_bytes)
+        return loaded_wav
+
+    def play_loaded_wav(
+        self, loaded_wav: LoadedWav, *, on_done: DoneCallback | None = None
+    ) -> PlayTask:
+        task = PlayTask()
+        self._register_task(task)
+        if on_done:
+            task.on_finish(on_done)
+
+        self._play_pcm_async(
+            task,
+            loaded_wav.pcm_bytes,
+            loaded_wav.sample_rate,
+            loaded_wav.channels,
+            loaded_wav.sample_width_bytes,
+            pyaudio_format=loaded_wav.pyaudio_format,
+        )
         return task
 
     def play_pcm(
@@ -299,23 +363,27 @@ class AudioPlayer:
         sample_rate: int,
         channels: int,
         sample_width_bytes: int,
+        pyaudio_format: int | None = None,
     ) -> None:
         def worker() -> None:
             stream = None
             try:
-                match sample_width_bytes:
-                    case 2:
-                        fmt = pyaudio.paInt16
-                    case 1:
-                        fmt = pyaudio.paUInt8
-                    case 3:
-                        fmt = pyaudio.paInt24
-                    case 4:
-                        fmt = pyaudio.paInt32
-                    case _:
-                        raise ValueError(
-                            f"Unsupported sample width: {sample_width_bytes}"
-                        )
+                if pyaudio_format is not None:
+                    fmt = pyaudio_format
+                else:
+                    match sample_width_bytes:
+                        case 2:
+                            fmt = pyaudio.paInt16
+                        case 1:
+                            fmt = pyaudio.paUInt8
+                        case 3:
+                            fmt = pyaudio.paInt24
+                        case 4:
+                            fmt = pyaudio.paInt32
+                        case _:
+                            raise ValueError(
+                                f"Unsupported sample width: {sample_width_bytes}"
+                            )
 
                 stream = self._pa.open(
                     format=fmt,
@@ -348,7 +416,6 @@ class AudioPlayer:
         Thread(target=worker, daemon=True).start()
 
 
-# --- Helpers ---
 def _unit_to_pcm_bytes(unit: PureToneUnit, *, sample_rate: int) -> bytes:
     if unit.stimulus is not None:
         return unit.stimulus.tobytes()
