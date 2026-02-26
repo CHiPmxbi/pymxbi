@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.4...v0.3.5) (2026-02-26)
+
+
+### Features
+
+* **audioplayer:** :sparkles: add soundfile-based wav loading and reusable playback ([#38](https://github.com/CHiPmxbi/pymxbi/issues/38)) ([7fe1224](https://github.com/CHiPmxbi/pymxbi/commit/7fe122464406866707e1a12bdc259f87fd132b25))
+
 ## [0.3.4](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.3...v0.3.4) (2026-02-18)
 
 
