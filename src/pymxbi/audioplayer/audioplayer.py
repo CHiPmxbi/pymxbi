@@ -36,7 +36,6 @@ class LoadedWav:
     pcm_bytes: bytes
     sample_rate: int
     channels: int
-    sample_width_bytes: int
     pyaudio_format: int
 
 
@@ -138,26 +137,17 @@ class AudioPlayer:
     def play_wav(
         self, file_path: Path, *, on_done: DoneCallback | None = None
     ) -> PlayTask:
-        task = PlayTask()
-        self._register_task(task)
-        if on_done:
-            task.on_finish(on_done)
-
         try:
             loaded_wav = self.load_wav(file_path)
         except Exception as e:
+            task = PlayTask()
+            self._register_task(task)
+            if on_done:
+                task.on_finish(on_done)
             self._finish_task(task, PlayResult(PlayStatus.ERROR, error=e))
             return task
 
-        self._play_pcm_async(
-            task,
-            loaded_wav.pcm_bytes,
-            loaded_wav.sample_rate,
-            loaded_wav.channels,
-            loaded_wav.sample_width_bytes,
-            pyaudio_format=loaded_wav.pyaudio_format,
-        )
-        return task
+        return self.play_loaded_wav(loaded_wav, on_done=on_done)
 
     def load_wav(self, file_path: Path) -> LoadedWav:
         wav_path = Path(file_path).expanduser().resolve()
@@ -188,31 +178,15 @@ class AudioPlayer:
                     pcm_bytes=pcm_bytes,
                     sample_rate=sample_rate,
                     channels=channels,
-                    sample_width_bytes=2,
                     pyaudio_format=pyaudio.paInt16,
                 )
-            elif subtype == "PCM_32":
-                pcm_i32 = sound_file.read(dtype="int32", always_2d=False)
-                pcm_bytes = np.ascontiguousarray(pcm_i32).tobytes()
-                loaded_wav = LoadedWav(
-                    pcm_bytes=pcm_bytes,
-                    sample_rate=sample_rate,
-                    channels=channels,
-                    sample_width_bytes=4,
-                    pyaudio_format=pyaudio.paInt32,
-                )
-            elif subtype == "PCM_24":
-                raise ValueError(
-                    f"Unsupported WAV subtype for playback: {subtype} ({wav_path})"
-                )
-            elif subtype in {"FLOAT", "DOUBLE"}:
+            elif subtype == "FLOAT":
                 float_pcm = sound_file.read(dtype="float32", always_2d=False)
                 pcm_bytes = np.ascontiguousarray(float_pcm).tobytes()
                 loaded_wav = LoadedWav(
                     pcm_bytes=pcm_bytes,
                     sample_rate=sample_rate,
                     channels=channels,
-                    sample_width_bytes=4,
                     pyaudio_format=pyaudio.paFloat32,
                 )
             else:
@@ -249,26 +223,8 @@ class AudioPlayer:
             loaded_wav.pcm_bytes,
             loaded_wav.sample_rate,
             loaded_wav.channels,
-            loaded_wav.sample_width_bytes,
-            pyaudio_format=loaded_wav.pyaudio_format,
+            loaded_wav.pyaudio_format,
         )
-        return task
-
-    def play_pcm(
-        self,
-        pcm_bytes: bytes,
-        *,
-        on_done: DoneCallback | None = None,
-        sample_rate: int = 44100,
-        channels: int = 1,
-        sample_width_bytes: int = 2,
-    ) -> PlayTask:
-        task = PlayTask()
-        self._register_task(task)
-        if on_done:
-            task.on_finish(on_done)
-
-        self._play_pcm_async(task, pcm_bytes, sample_rate, channels, sample_width_bytes)
         return task
 
     def play_puretone_sequence(
@@ -308,19 +264,22 @@ class AudioPlayer:
                         raise ValueError(
                             "PureToneUnit.stimulus is None; generate stimulus via PureToneGenerator before playback"
                         )
-                    if u.stimulus.dtype != np.dtype(np.int32):
+                    if u.stimulus.dtype != np.dtype(np.int16):
                         raise ValueError(
-                            f"PureToneUnit.stimulus must be int32, got {u.stimulus.dtype}"
+                            f"PureToneUnit.stimulus must be int16, got {u.stimulus.dtype}"
                         )
 
                 stream = self._pa.open(
-                    format=pyaudio.paInt32,
+                    format=pyaudio.paInt16,
                     channels=1,
                     rate=sample_rate,
                     output=True,
+                    frames_per_buffer=1024,
                 )
 
-                chunk = 4096
+                frames_per_chunk = 1024
+                bytes_per_frame = 2
+                chunk_bytes = frames_per_chunk * bytes_per_frame
                 for unit in units:
                     if task._cancel.is_set():
                         self._finish_task(task, PlayResult(PlayStatus.CANCELED))
@@ -332,14 +291,14 @@ class AudioPlayer:
                     if unit.digital_volume is not None:
                         set_digital_volume(unit.digital_volume)
 
-                    data = _unit_to_pcm_bytes(unit, sample_rate=sample_rate)
+                    data = _unit_to_pcm_bytes(unit)
 
-                    for i in range(0, len(data), chunk):
+                    for i in range(0, len(data), chunk_bytes):
                         if task._cancel.is_set():
                             self._finish_task(task, PlayResult(PlayStatus.CANCELED))
                             return
                         # Write in chunks so cancel() can interrupt between writes.
-                        stream.write(data[i : i + chunk])
+                        stream.write(data[i : i + chunk_bytes])
 
                 self._finish_task(task, PlayResult(PlayStatus.FINISHED))
 
@@ -362,43 +321,31 @@ class AudioPlayer:
         pcm_bytes: bytes,
         sample_rate: int,
         channels: int,
-        sample_width_bytes: int,
-        pyaudio_format: int | None = None,
+        pyaudio_format: int,
     ) -> None:
         def worker() -> None:
             stream = None
             try:
-                if pyaudio_format is not None:
-                    fmt = pyaudio_format
-                else:
-                    match sample_width_bytes:
-                        case 2:
-                            fmt = pyaudio.paInt16
-                        case 1:
-                            fmt = pyaudio.paUInt8
-                        case 3:
-                            fmt = pyaudio.paInt24
-                        case 4:
-                            fmt = pyaudio.paInt32
-                        case _:
-                            raise ValueError(
-                                f"Unsupported sample width: {sample_width_bytes}"
-                            )
+                if pyaudio_format not in {pyaudio.paInt16, pyaudio.paFloat32}:
+                    raise ValueError(f"Unsupported pyaudio format: {pyaudio_format}")
 
                 stream = self._pa.open(
-                    format=fmt,
+                    format=pyaudio_format,
                     channels=channels,
                     rate=sample_rate,
                     output=True,
+                    frames_per_buffer=1024,
                 )
 
-                chunk = 4096
-                for i in range(0, len(pcm_bytes), chunk):
+                frames_per_chunk = 1024
+                sample_width_bytes = 2 if pyaudio_format == pyaudio.paInt16 else 4
+                chunk_bytes = frames_per_chunk * channels * sample_width_bytes
+                for i in range(0, len(pcm_bytes), chunk_bytes):
                     if task._cancel.is_set():
                         self._finish_task(task, PlayResult(PlayStatus.CANCELED))
                         return
                     # Blocking write happens on a background thread.
-                    stream.write(pcm_bytes[i : i + chunk])
+                    stream.write(pcm_bytes[i : i + chunk_bytes])
 
                 self._finish_task(task, PlayResult(PlayStatus.FINISHED))
 
@@ -416,8 +363,12 @@ class AudioPlayer:
         Thread(target=worker, daemon=True).start()
 
 
-def _unit_to_pcm_bytes(unit: PureToneUnit, *, sample_rate: int) -> bytes:
+def _unit_to_pcm_bytes(unit: PureToneUnit) -> bytes:
     if unit.stimulus is not None:
+        if unit.stimulus.dtype != np.dtype(np.int16):
+            raise ValueError(
+                f"PureToneUnit.stimulus must be int16, got {unit.stimulus.dtype}"
+            )
         return unit.stimulus.tobytes()
 
     raise ValueError(
