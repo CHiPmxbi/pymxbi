@@ -10,7 +10,7 @@ class PureToneUnit:
     frequency_hz: int  # Hz
     duration_ms: int  # ms
     intensity: float | None = None  # 0.0~1.0, None -> generator default
-    stimulus: NDArray[np.int32] | None = None
+    stimulus: NDArray[np.int16] | None = None
     master_volume: int | None = None
     digital_volume: int | None = None
 
@@ -34,16 +34,16 @@ class PureToneGenerator:
 
     def _wave_unit_impl(
         self, frequency: int, duration: int, intensity: float
-    ) -> NDArray[np.int32]:
+    ) -> NDArray[np.int16]:
         samples = int(self.sample_rate * duration / 1000)
         if samples <= 0:
-            return np.zeros(0, dtype=np.int32)
+            return np.zeros(0, dtype=np.int16)
 
         if frequency <= 0:
-            return np.zeros(samples, dtype=np.int32)
+            return np.zeros(samples, dtype=np.int16)
 
         if intensity <= 0:
-            return np.zeros(samples, dtype=np.int32)
+            return np.zeros(samples, dtype=np.int16)
 
         t = np.arange(samples) / self.sample_rate
         tone = np.sin(2 * np.pi * frequency * t)
@@ -58,14 +58,14 @@ class PureToneGenerator:
             envelope[-fade_samples:] = np.linspace(1, 0, fade_samples)
             tone *= envelope
 
-        max_i32 = np.iinfo(np.int32).max
-        scaled = tone * (max_i32 * intensity)
-        scaled = np.clip(scaled, -max_i32, max_i32)
-        return scaled.astype(np.int32)
+        max_i16 = np.iinfo(np.int16).max
+        scaled = tone * (max_i16 * intensity)
+        scaled = np.clip(scaled, -max_i16, max_i16)
+        return scaled.astype(np.int16)
 
     def gen_wave_unit(
         self, frequency: int, duration: int, *, intensity: float | None = None
-    ) -> NDArray[np.int32]:
+    ) -> NDArray[np.int16]:
         effective_intensity = self.intensity if intensity is None else intensity
         if not (0.0 <= effective_intensity <= 1.0):
             raise ValueError(
