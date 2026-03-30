@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.5...v0.3.6) (2026-03-30)
+
+
+### Bug Fixes
+
+* **audioplayer:** :bug: align playback paths with supported formats ([#42](https://github.com/CHiPmxbi/pymxbi/issues/42)) ([38e5884](https://github.com/CHiPmxbi/pymxbi/commit/38e588480939e5e261e427923416f21fe29e71fe))
+
 ## [0.3.5](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.4...v0.3.5) (2026-02-26)
 
 
