@@ -86,7 +86,12 @@ def _make_detector(config: DetectorModel) -> Detector:
         case DetectorEnum.FUSION_CONTINUOUS:
             rfid_reader = DorsetLID665v42(config.port, config.baudrate)
             sensor = RPIIRBreakBeamSensor(config.pin)
-            return FusionContinuousDetector(rfid_reader, sensor)
+            return FusionContinuousDetector(
+                rfid_reader,
+                sensor,
+                poll_interval=config.poll_interval,
+                rfid_timeout=config.rfid_timeout,
+            )
 
         case _:
             raise ValueError(f"Unknown detector type: {config.type}")
