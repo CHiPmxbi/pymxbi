@@ -77,7 +77,7 @@ class PlayTask:
 
 
 class AudioPlayer:
-    def __init__(self, *, blocksize: int = 4096):
+    def __init__(self, *, blocksize: int = 1024):
         if blocksize <= 0:
             raise ValueError("blocksize must be positive")
         self._blocksize = blocksize
