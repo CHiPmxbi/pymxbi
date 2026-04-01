@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.7](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.6...v0.3.7) (2026-04-01)
+
+
+### Features
+
+* **detector:** :sparkles: add poll_interval and rfid_timeout to FusionContinuousDetector ([#46](https://github.com/CHiPmxbi/pymxbi/issues/46)) ([50ea757](https://github.com/CHiPmxbi/pymxbi/commit/50ea757d943c97f84a7d05ee31bdd98e845af67e))
+
+
+### Bug Fixes
+
+* **audioplayer:** migrate playback backend to sounddevice ([#44](https://github.com/CHiPmxbi/pymxbi/issues/44)) ([a358e9a](https://github.com/CHiPmxbi/pymxbi/commit/a358e9a09304b520c31a631f43051ab369b26987))
+
 ## [0.3.6](https://github.com/CHiPmxbi/pymxbi/compare/v0.3.5...v0.3.6) (2026-03-30)
 
 
