@@ -57,7 +57,9 @@ class RPIIRBreakBeamSensor:
             ``True`` when the beam is broken, ``False`` when intact.
         """
         with self._lock:
-            return not self._last_stable
+            result = not self._last_stable
+            print(result)
+            return result
 
     def close(self) -> None:
         """Stop polling and release GPIO resources."""
