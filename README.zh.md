@@ -2,9 +2,15 @@
 
 为 mxbi 硬件设备提供面向 Python 的接口与驱动
 
+> [!IMPORTANT]
+> 本项目已经合并到 [mxbiflow](https://github.com/CHiPmxbi/mxbiflow)，新命名空间为
+> `mxbiflow.driver`。本仓库与 `pymxbi` 包不再维护或发布。请安装
+> `mxbiflow>=0.3.17`，并将 `pymxbi.detector` 等导入替换为
+> `mxbiflow.driver.detector`。
+
 中文 | [English](README.md)
 
-## 安装
+## 旧版安装
 
 ```bash
 pip install pymxbi
