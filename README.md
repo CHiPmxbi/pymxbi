@@ -2,9 +2,16 @@
 
 Python interfaces and drivers for mxbi
 
+> [!IMPORTANT]
+> This project has moved into
+> [mxbiflow](https://github.com/CHiPmxbi/mxbiflow) as `mxbiflow.driver`.
+> This repository and the `pymxbi` package are no longer maintained or
+> published. Install `mxbiflow>=0.3.17` and replace imports such as
+> `pymxbi.detector` with `mxbiflow.driver.detector`.
+
 English | [中文](README.zh.md)
 
-## Install
+## Legacy installation
 
 ```bash
 pip install pymxbi
