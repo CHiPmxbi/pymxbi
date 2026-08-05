@@ -7,15 +7,6 @@ from .detector import Detector, DetectorEnum
 from .fusion_continuous_detector import FusionContinuousDetector
 from .mock_detector import MockDetector
 from .rfid_continuous_detector import RFIDContinuousDetector
-from .standard_gate_detector import StandardGateDetector
-
-detectors: dict[str, type[Detector]] = {
-    DetectorEnum.MOCK: MockDetector,
-    DetectorEnum.STANDARD_GATE: StandardGateDetector,
-    DetectorEnum.RFID_CONTINUOUS: RFIDContinuousDetector,
-    DetectorEnum.BEAMBREAK_CONTINUOUS: BeambreakContinuousDetector,
-    DetectorEnum.FUSION_CONTINUOUS: FusionContinuousDetector,
-}
 
 
 class MockDetectorModel(BaseModel):
@@ -92,16 +83,15 @@ DetectorModel: TypeAlias = Annotated[
 
 
 __all__ = [
-    "Detector",
-    "MockDetector",
-    "MockDetectorModel",
-    "StandardGateDetector",
-    "RFIDContinuousDetector",
-    "RFIDContinuousDetectorModel",
-    "BeambreakContinuousDetector",
     "BeamBreakContinuousDetectorModel",
-    "FusionContinuousDetector",
+    "BeambreakContinuousDetector",
+    "Detector",
     "DetectorEnum",
     "DetectorModel",
-    "detectors",
+    "FusionContinuousDetector",
+    "FusionContinuousDetectorModel",
+    "MockDetector",
+    "MockDetectorModel",
+    "RFIDContinuousDetector",
+    "RFIDContinuousDetectorModel",
 ]

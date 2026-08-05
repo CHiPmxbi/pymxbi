@@ -5,7 +5,6 @@ from typing import Callable, Protocol
 
 class DetectorEnum(StrEnum):
     MOCK = auto()
-    STANDARD_GATE = auto()
     RFID_CONTINUOUS = auto()
     BEAMBREAK_CONTINUOUS = auto()
     FUSION_CONTINUOUS = auto()

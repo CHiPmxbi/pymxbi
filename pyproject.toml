@@ -14,14 +14,10 @@ dependencies = [
     "pyglet>=2.1.13",
     "pymotego>=0.1.5",
     "pyserial>=3.5",
-    "rich>=14.2.0",
     "soundfile>=0.13.1",
     "sounddevice>=0.5.3",
     "typer>=0.21.1",
 ]
-
-[project.scripts]
-pymxbi = "pymxbi.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]

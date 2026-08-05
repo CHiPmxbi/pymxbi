@@ -20,9 +20,12 @@ uv add pymxbi
 
 ### Detectors
 
-- `pymxbi.detector.detector.Detector`: base class + event registration
-- `pymxbi.detector.detector.DetectorEvent` / `DetectorState` / `DetectionResult`
-- `pymxbi.detector.beam_break_rfid_detector.BeamBreakRFIDDetector`: beam-break + RFID combined detector
+- Core types: `pymxbi.detector.detector.Detector`, `DetectorEvent`, and `DetectionResult`
+- `pymxbi.detector.RFIDContinuousDetector`: RFID presence detection
+- `pymxbi.detector.BeambreakContinuousDetector`: beam-break presence detection
+- `pymxbi.detector.FusionContinuousDetector`: combined beam-break and RFID detection
+- `pymxbi.detector.MockDetector`: in-memory detector for testing and development
+- Configuration models: `DetectorModel`, `MockDetectorModel`, `RFIDContinuousDetectorModel`, `BeamBreakContinuousDetectorModel`, and `FusionContinuousDetectorModel`
 
 ### Rewarders
 
@@ -33,12 +36,12 @@ uv add pymxbi
 ### Peripherals
 
 - Pumps: `pymxbi.peripheral.pumps.pump.Pump` / `Direction`, `pymxbi.peripheral.pumps.RPI_gpio_pump.RPIGpioPump`
-- Through-beam sensors: `pymxbi.peripheral.through_beam_sensor.through_beam_sensor.ThroughBeamSensor`, `pymxbi.peripheral.through_beam_sensor.RPI_IR_break_beam_sensor.RPIIRBreakBeamSensor`
+- Beam-break sensors: `pymxbi.peripheral.beam_break_sensor.BeamBreakSensor`, `RPIIRBreakBeamSensor`
 - RFID reader: `pymxbi.peripheral.rfid.dorset_lid665v42.DorsetLID665v42` (`open`, `begin`, `read`, `close`, `errno`)
 
 ### Utilities
 
-- Audio volume: `pymxbi.peripheral.amixer.amixer.set_master_volume`, `set_digital_volume` (calls `amixer`)
+- Audio volume: `pymxbi.infra.set_master_volume`, `set_digital_volume` (calls `amixer`)
 
 ## Notes
 
